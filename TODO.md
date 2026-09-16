@@ -109,6 +109,10 @@
 
 ## Features
 
+- [x] Optional `spec.runtime.mode: CronJobWithVolumeHolder`: pause Deployment holds the PVC attached; CronJob pods use required podAffinity on `kubernetes.io/hostname`. Default remains `CronJob`.
+- [ ] `spec.runtime.mode: PersistentPodWithTriggerJob`. Notes: long-lived pipeline Deployment keeps the PVC mounted; PVC-less trigger CronJob writes a run-token ConfigMap and waits on a result ConfigMap (keeps Job status / `kubectl create job --from=`). Scratch must be `$DATA_ROOT/run-$RUN_ID` (HOSTNAME is stable; `already_done_hold` would skip later runs). Stages must loop on the token and must not exit after `.step-job-done` (Deployment restart would skip work). Role limited to those ConfigMaps. Idle memory is all stage requests — prefer VolumeHolder for rare restores.
+- [ ] `spec.runtime.mode: PersistentPodWithInPodCron`. Notes: same long-lived pipeline pod as the trigger-Job mode, but a sidecar (e.g. supercronic) fires the run token. No CronJob; manual trigger is annotate/exec; last-run status cannot use Job objects unless a result ConfigMap is added. Implement trigger-Job mode first and share the loop/scratch protocol.
+- [ ] Pin the volume-holder Deployment to the bound node without recreating the pod after attach. Notes: adding nodeAffinity after the holder is Running changes the pod template (Recreate → detach). Freeze affinity on first create only, or pin from `volume.kubernetes.io/selected-node` before the holder exists. Do not set `nodeName` on a live template.
 - [ ] `spec.backupRef` on Restore: inherit engine, S3 path, and encryption settings from a Backup
 - [ ] BackupRun / manual trigger CR or subresource (no `kubectl create job --from=cronjob/…`)
 - [ ] Last object in status: S3 key, size, checksum of the last successful dump; Restore can default to it

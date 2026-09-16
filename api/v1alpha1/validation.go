@@ -32,6 +32,9 @@ func ValidateBackupSpec(spec BackupSpec) error {
 	if err := validateJobPolicy(spec.Job); err != nil {
 		return err
 	}
+	if err := validateRuntime(spec.Runtime, spec.Persistence); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -72,6 +75,9 @@ func ValidateRestoreSpec(spec RestoreSpec) error {
 	if err := validateJobPolicy(spec.Job); err != nil {
 		return err
 	}
+	if err := validateRuntime(spec.Runtime, spec.Persistence); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -83,6 +89,31 @@ func validateSchedule(schedule string) error {
 		return fmt.Errorf("spec.schedule is not a valid cron expression: %w", err)
 	}
 	return nil
+}
+
+func validateRuntime(runtime *RuntimeSpec, persistence *PersistenceSpec) error {
+	switch runtime.EffectiveMode() {
+	case RuntimeModeCronJob:
+		return nil
+	case RuntimeModeCronJobWithVolumeHolder:
+		if !persistenceEnabled(persistence) {
+			return fmt.Errorf("spec.runtime.mode CronJobWithVolumeHolder requires spec.persistence.enabled")
+		}
+		return nil
+	case RuntimeModePersistentPodWithTriggerJob:
+		return fmt.Errorf("spec.runtime.mode PersistentPodWithTriggerJob is not implemented")
+	case RuntimeModePersistentPodWithInPodCron:
+		return fmt.Errorf("spec.runtime.mode PersistentPodWithInPodCron is not implemented")
+	default:
+		return fmt.Errorf("spec.runtime.mode %q is invalid", runtime.EffectiveMode())
+	}
+}
+
+func persistenceEnabled(p *PersistenceSpec) bool {
+	if p == nil || p.Enabled == nil {
+		return true
+	}
+	return *p.Enabled
 }
 
 func validateJobPolicy(job *JobPolicy) error {

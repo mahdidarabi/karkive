@@ -610,6 +610,46 @@ spec:
                         type: object
                     type: object
                 type: object
+              runtime:
+                description: |-
+                  Runtime selects how pipeline pods are scheduled relative to the PVC.
+                  Default mode CronJob. CronJobWithVolumeHolder is implemented.
+                  PersistentPodWithTriggerJob and PersistentPodWithInPodCron are rejected
+                  until implemented.
+                properties:
+                  mode:
+                    default: CronJob
+                    description: |-
+                      Mode is the pod runtime. Default CronJob.
+
+                      CronJob: existing behaviour — CronJob creates a Job pod per run; the PVC
+                      is attached and detached every time.
+
+                      CronJobWithVolumeHolder: same CronJob pipeline, plus a 1-replica pause
+                      Deployment that keeps the PVC attached. Job pods must schedule on that
+                      node (required podAffinity). Persistence must stay enabled.
+
+                      PersistentPodWithTriggerJob: not implemented. Long-lived pipeline
+                      Deployment (PVC stays mounted) plus a PVC-less trigger CronJob that
+                      writes a run token and waits for a result ConfigMap.
+                      Implementation notes: scratch must be $DATA_ROOT/run-$RUN_ID (HOSTNAME is
+                      stable; already_done_hold would skip later runs). Stages must loop on the
+                      token and must not exit after .step-job-done (Deployment restart would
+                      skip work). Trigger Job needs a Role limited to the run/result ConfigMaps.
+                      Idle memory is all stage requests; prefer CronJobWithVolumeHolder for
+                      rare restores.
+
+                      PersistentPodWithInPodCron: not implemented. Same long-lived pipeline
+                      pod, but a sidecar (e.g. supercronic) fires the run token. No CronJob;
+                      kubectl create job --from=… goes away; last-run status cannot use Job
+                      objects unless a result ConfigMap is added.
+                    enum:
+                    - CronJob
+                    - CronJobWithVolumeHolder
+                    - PersistentPodWithTriggerJob
+                    - PersistentPodWithInPodCron
+                    type: string
+                type: object
               s3:
                 description: S3 source of encrypted dumps.
                 properties:
@@ -791,6 +831,11 @@ spec:
                 description: |-
                   Phase is admission of owned resources: Pending, Ready, Error, Unsupported.
                   It is not the last Job outcome; see RestoreSucceeded.
+                type: string
+              volumeHolderName:
+                description: |-
+                  VolumeHolderName is the pause Deployment that keeps the PVC attached.
+                  Empty unless spec.runtime.mode is CronJobWithVolumeHolder.
                 type: string
             type: object
         type: object

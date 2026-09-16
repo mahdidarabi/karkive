@@ -2,7 +2,7 @@
 
 [![Website](https://img.shields.io/badge/website-karkive.ir-c4a35a)](https://karkive.ir)
 [![CI](https://github.com/mahdidarabi/karkive/actions/workflows/ci.yaml/badge.svg)](https://github.com/mahdidarabi/karkive/actions/workflows/ci.yaml)
-[![Helm](https://img.shields.io/badge/Helm-0.0.10--p.5-0F1689?logo=helm)](https://github.com/mahdidarabi/karkive/pkgs/container/charts%2Fkarkive)
+[![Helm](https://img.shields.io/badge/Helm-0.0.11--p.1-0F1689?logo=helm)](https://github.com/mahdidarabi/karkive/pkgs/container/charts%2Fkarkive)
 [![Image](https://img.shields.io/badge/GHCR-karkive-blue?logo=github)](https://github.com/mahdidarabi/karkive/pkgs/container/karkive)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go)](https://go.dev/)
 [![Kubebuilder](https://img.shields.io/badge/API-karkive.io%2Fv1alpha1-326CE5?logo=kubernetes)](https://github.com/mahdidarabi/karkive/tree/main/api/v1alpha1)
@@ -46,6 +46,7 @@ A CR named `app-postgres` is reconciled into owned resources prefixed by kind:
 | ConfigMap | `karkive-backup-app-postgres` | `karkive-restore-app-postgres` | Embedded pipeline scripts |
 | PVC | `karkive-backup-app-postgres` | `karkive-restore-app-postgres` | Skip with `spec.persistence.enabled: false` (emptyDir) |
 | CronJob | `karkive-backup-app-postgres` | `karkive-restore-app-postgres` | One Job per schedule (or `kubectl create job --from=…`) |
+| Deployment | `karkive-backup-app-postgres-holder` | `karkive-restore-app-postgres-holder` | Only when `spec.runtime.mode: CronJobWithVolumeHolder` |
 
 ```mermaid
 flowchart LR
@@ -74,19 +75,40 @@ flowchart LR
 
 Shared stages use BusyBox (`find` / `gzip`), `vladgh/gpg`, and MinIO `mc`. Engine images default to CloudNativePG PostgreSQL 18.4, MariaDB 10.6, and Redis 7.4.
 
+### Runtime
+
+`spec.runtime.mode` (default `CronJob`) selects how pipeline pods are scheduled relative to the PVC:
+
+| Mode | Status |
+| --- | --- |
+| `CronJob` | Implemented. New Job pod each run (CSI attach/detach). |
+| `CronJobWithVolumeHolder` | Implemented. Pause Deployment keeps the PVC attached on one node; Job pods colocate with required podAffinity. Requires `spec.persistence.enabled`. Ready waits until the holder is Available. |
+| `PersistentPodWithTriggerJob` | Not implemented (admission rejects). |
+| `PersistentPodWithInPodCron` | Not implemented (admission rejects). |
+
+`CronJobWithVolumeHolder` is for clusters where a new Job cannot attach the claim after the previous pod is gone (not RWX). RWO still allows several pods on **one node**; the holder is the long-lived attacher, the Job only mounts.
+
+```yaml
+spec:
+  runtime:
+    mode: CronJobWithVolumeHolder
+  persistence:
+    enabled: true
+```
+
 Redis restore starts an ephemeral `redis-server` in the Job and has the target `REPLICAOF` that pod (`:6380`). The target must be able to connect to the Job pod. A non-empty target is replaced only when `spec.dropDatabaseIfExists` is true (the default).
 
 ## Install
 
 Images are published to `ghcr.io/mahdidarabi/karkive` from GitHub Actions on `main` (`latest`, `main`, `sha-<git-sha>`) and on tags `v*` (semver). Helm charts are pushed to GHCR on tags `v*`. `Chart.yaml` `version` and `appVersion` must match the tag without the `v` prefix.
 
-Current release: **`0.0.10-p.5`**
+Current release: **`0.0.11-p.1`**
 
 ```bash
-helm show chart oci://ghcr.io/mahdidarabi/charts/karkive --version 0.0.10-p.5
+helm show chart oci://ghcr.io/mahdidarabi/charts/karkive --version 0.0.11-p.1
 
 helm install karkive oci://ghcr.io/mahdidarabi/charts/karkive \
-  --version 0.0.10-p.5 \
+  --version 0.0.11-p.1 \
   -n karkive-system --create-namespace
 ```
 
@@ -94,7 +116,7 @@ With Prometheus Operator scrape, alerts, and a Grafana dashboard ConfigMap:
 
 ```bash
 helm install karkive oci://ghcr.io/mahdidarabi/charts/karkive \
-  --version 0.0.10-p.5 \
+  --version 0.0.11-p.1 \
   -n karkive-system --create-namespace \
   --set metrics.serviceMonitor.enabled=true \
   --set metrics.prometheusRule.enabled=true \
@@ -105,7 +127,7 @@ On GitOps (Argo CD), prefer cert-manager for webhook serving certs so Helm does 
 
 ```bash
 helm install karkive oci://ghcr.io/mahdidarabi/charts/karkive \
-  --version 0.0.10-p.5 \
+  --version 0.0.11-p.1 \
   -n karkive-system --create-namespace \
   --set webhook.certManager.enabled=true
 ```
@@ -170,6 +192,7 @@ Useful knobs:
 | `spec.job.restartPolicy` | `Never` | Do not restart a single container in-place (wipes pipeline markers) |
 | `spec.job.backoffLimit` | `3` | Job retries (new pod) |
 | `spec.job.ttlSecondsAfterFinished` | `86400` | Cleanup finished Jobs |
+| `spec.runtime.mode` | `CronJob` | `CronJob` (default) or `CronJobWithVolumeHolder`. `PersistentPodWithTriggerJob` and `PersistentPodWithInPodCron` are reserved and rejected until implemented |
 | `spec.images` | operator defaults | Shared `ImageSet`: busybox / gpg / postgres / mariadb / redis / mc |
 | `spec.resources` | — | Per-stage CPU/memory (`cleanup`, `dump`, `compress`, `encrypt`, `s3Sync`) |
 | `spec.component` | CR name | `app.kubernetes.io/component` label |
@@ -226,6 +249,7 @@ spec:
 | `spec.logFileEnabled` | `false` | Also write stage logs to `logs/<pod>.log` on the volume |
 | `spec.job.restartPolicy` | `Never` | Restore Jobs do not restart in-place |
 | `spec.job.backoffLimit` | `1` | Fail fast |
+| `spec.runtime.mode` | `CronJob` | Same modes as Backup. VolumeHolder requires persistence |
 
 ## Secrets
 

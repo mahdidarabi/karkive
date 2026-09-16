@@ -265,6 +265,14 @@ func s3RetentionDays(backup *karkivev1alpha1.Backup) int32 {
 	return ptr.Deref(backup.Spec.S3.RetentionDays, config.DefaultS3RetentionDays)
 }
 
+func BackupVolumeMountPath(backup *karkivev1alpha1.Backup) string {
+	return dataDir(backup)
+}
+
+func RestoreVolumeMountPath(restore *karkivev1alpha1.Restore) string {
+	return restoreWorkdir(restore)
+}
+
 func dataDir(backup *karkivev1alpha1.Backup) string {
 	return firstNonEmpty(backup.Spec.DataDir, config.DefaultDataDir)
 }

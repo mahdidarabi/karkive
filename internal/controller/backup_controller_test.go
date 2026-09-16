@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -29,6 +30,9 @@ func testScheme(t *testing.T) *runtime.Scheme {
 		t.Fatal(err)
 	}
 	if err := batchv1.AddToScheme(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := appsv1.AddToScheme(s); err != nil {
 		t.Fatal(err)
 	}
 	if err := karkivev1alpha1.AddToScheme(s); err != nil {
@@ -126,6 +130,74 @@ func TestBackupReconcile_CreatesOwnedResources(t *testing.T) {
 	succeeded := meta.FindStatusCondition(updated.Status.Conditions, karkivev1alpha1.ConditionBackupSucceeded)
 	if succeeded == nil || succeeded.Status != metav1.ConditionUnknown {
 		t.Errorf("BackupSucceeded=%v", succeeded)
+	}
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: backup.Namespace, Name: resources.VolumeHolderName(owned)}, &appsv1.Deployment{}); err == nil {
+		t.Fatal("default CronJob runtime must not create a volume holder")
+	}
+}
+
+func TestBackupReconcile_VolumeHolderPendingThenReady(t *testing.T) {
+	scheme := testScheme(t)
+	backup := testBackupCR()
+	backup.Spec.Runtime = &karkivev1alpha1.RuntimeSpec{Mode: karkivev1alpha1.RuntimeModeCronJobWithVolumeHolder}
+	secret := testBackupSecret()
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(backup, secret).
+		WithStatusSubresource(&karkivev1alpha1.Backup{}, &appsv1.Deployment{}).
+		Build()
+	r := &BackupReconciler{Client: c, Scheme: scheme, Recorder: record.NewFakeRecorder(8)}
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: backup.Name, Namespace: backup.Namespace}}
+	res, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.RequeueAfter != holderRequeue {
+		t.Fatalf("requeue=%v, want %v", res.RequeueAfter, holderRequeue)
+	}
+
+	owned := resources.BackupOwnedName(backup)
+	holderName := resources.VolumeHolderName(owned)
+	deploy := &appsv1.Deployment{}
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: backup.Namespace, Name: holderName}, deploy); err != nil {
+		t.Fatalf("holder: %v", err)
+	}
+	if deploy.Spec.Strategy.Type != appsv1.RecreateDeploymentStrategyType {
+		t.Errorf("strategy=%q", deploy.Spec.Strategy.Type)
+	}
+	cj := &batchv1.CronJob{}
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: backup.Namespace, Name: owned}, cj); err != nil {
+		t.Fatal(err)
+	}
+	aff := cj.Spec.JobTemplate.Spec.Template.Spec.Affinity
+	if aff == nil || aff.PodAffinity == nil || len(aff.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution) != 1 {
+		t.Fatalf("expected required podAffinity, got %#v", aff)
+	}
+
+	pending := &karkivev1alpha1.Backup{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(backup), pending); err != nil {
+		t.Fatal(err)
+	}
+	if pending.Status.Phase != karkivev1alpha1.BackupPhasePending {
+		t.Errorf("phase=%q, want Pending", pending.Status.Phase)
+	}
+	if pending.Status.VolumeHolderName != holderName {
+		t.Errorf("volumeHolderName=%q", pending.Status.VolumeHolderName)
+	}
+
+	deploy.Status.AvailableReplicas = 1
+	if err := c.Status().Update(context.Background(), deploy); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	ready := &karkivev1alpha1.Backup{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(backup), ready); err != nil {
+		t.Fatal(err)
+	}
+	if ready.Status.Phase != karkivev1alpha1.BackupPhaseReady {
+		t.Errorf("phase=%q, want Ready", ready.Status.Phase)
 	}
 }
 

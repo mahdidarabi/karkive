@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -24,6 +25,7 @@ import (
 
 const (
 	secretRequeue = 30 * time.Second
+	holderRequeue = 10 * time.Second
 )
 
 var requiredBackupSecretKeys = []string{
@@ -50,6 +52,7 @@ type BackupReconciler struct {
 // +kubebuilder:rbac:groups=karkive.io,resources=backups/finalizers,verbs=update
 // +kubebuilder:rbac:groups=batch,resources=cronjobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch
+// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
@@ -72,49 +75,80 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		engine := resources.EffectiveEngine(backup.Spec.Engine)
 		msg := fmt.Sprintf("engine %q is not implemented", engine)
 		logger.Info(msg)
-		return ctrl.Result{}, r.setStatus(ctx, backup, karkivev1alpha1.BackupPhaseUnsupported, metav1.ConditionFalse, "UnsupportedEngine", msg, corev1.EventTypeWarning, nil)
+		return ctrl.Result{}, r.setStatus(ctx, backup, karkivev1alpha1.BackupPhaseUnsupported, metav1.ConditionFalse, "UnsupportedEngine", msg, corev1.EventTypeWarning, nil, "")
 	}
 
 	if err := karkivev1alpha1.ValidateBackupSpec(backup.Spec); err != nil {
-		return ctrl.Result{}, r.setStatus(ctx, backup, karkivev1alpha1.BackupPhaseError, metav1.ConditionFalse, "InvalidSpec", err.Error(), corev1.EventTypeWarning, nil)
+		return ctrl.Result{}, r.setStatus(ctx, backup, karkivev1alpha1.BackupPhaseError, metav1.ConditionFalse, "InvalidSpec", err.Error(), corev1.EventTypeWarning, nil, "")
 	}
 
 	if err := r.ensureSecret(ctx, backup); err != nil {
 		if apierrors.IsNotFound(err) {
 			msg := fmt.Sprintf("secret %q not found", backup.Spec.SecretRef.Name)
-			if statusErr := r.setStatus(ctx, backup, karkivev1alpha1.BackupPhasePending, metav1.ConditionFalse, "SecretNotFound", msg, corev1.EventTypeWarning, nil); statusErr != nil {
+			if statusErr := r.setStatus(ctx, backup, karkivev1alpha1.BackupPhasePending, metav1.ConditionFalse, "SecretNotFound", msg, corev1.EventTypeWarning, nil, ""); statusErr != nil {
 				return ctrl.Result{}, statusErr
 			}
 			return ctrl.Result{RequeueAfter: secretRequeue}, nil
 		}
-		return ctrl.Result{}, r.setStatus(ctx, backup, karkivev1alpha1.BackupPhaseError, metav1.ConditionFalse, "SecretInvalid", err.Error(), corev1.EventTypeWarning, nil)
+		return ctrl.Result{}, r.setStatus(ctx, backup, karkivev1alpha1.BackupPhaseError, metav1.ConditionFalse, "SecretInvalid", err.Error(), corev1.EventTypeWarning, nil, "")
 	}
 
+	owned := resources.BackupOwnedName(backup)
+	holderName := resources.VolumeHolderName(owned)
+	needHolder := resources.NeedsVolumeHolder(backup.Spec.Runtime)
 	cron, err := ensureOwned(ctx, r.Client, r.Scheme, ownedResources{
-		Owner:       backup,
-		Name:        resources.BackupOwnedName(backup),
-		Persistence: backup.Spec.Persistence,
-		Labels:      resources.BackupLabels(backup),
+		Owner:        backup,
+		Name:         owned,
+		Persistence:  backup.Spec.Persistence,
+		Labels:       resources.BackupLabels(backup),
+		VolumeHolder: needHolder,
+		HolderName:   holderName,
 		MutateConfigMap: func(cm *corev1.ConfigMap) error {
 			return resources.MutateBackupConfigMap(cm, backup, r.Config)
 		},
 		MutateCronJob: func(cj *batchv1.CronJob) {
 			resources.MutateBackupCronJob(cj, backup, r.Config)
 		},
+		MutateVolumeHolder: func(deploy *appsv1.Deployment) {
+			resources.MutateVolumeHolderDeployment(deploy, resources.VolumeHolderSpec{
+				Name:      holderName,
+				Labels:    resources.WithRuntimeRole(resources.BackupLabels(backup), resources.RuntimeRoleVolumeHolder),
+				Selector:  resources.VolumeHolderMatchLabels(resources.KindBackup, backup.Name),
+				ClaimName: owned,
+				MountPath: resources.BackupVolumeMountPath(backup),
+				Images:    backup.Spec.Images,
+			}, r.Config)
+		},
 	})
 	if err != nil {
 		return ctrl.Result{}, r.fail(ctx, backup, ownedReason(err), err)
 	}
-	if err := deleteLegacyOwned(ctx, r.Client, backup, resources.BackupOwnedName(backup)); err != nil {
+	if err := deleteLegacyOwned(ctx, r.Client, backup, owned); err != nil {
 		return ctrl.Result{}, r.fail(ctx, backup, "LegacyCleanupError", err)
 	}
 
+	statusHolder := ""
+	if needHolder {
+		statusHolder = holderName
+		deploy := &appsv1.Deployment{}
+		if err := r.Get(ctx, client.ObjectKey{Namespace: backup.Namespace, Name: holderName}, deploy); err != nil {
+			return ctrl.Result{}, r.fail(ctx, backup, "VolumeHolderError", err)
+		}
+		if !volumeHolderAvailable(deploy) {
+			msg := fmt.Sprintf("waiting for volume holder Deployment %s", holderName)
+			if statusErr := r.setStatus(ctx, backup, karkivev1alpha1.BackupPhasePending, metav1.ConditionFalse, "VolumeHolderNotReady", msg, corev1.EventTypeNormal, cron, statusHolder); statusErr != nil {
+				return ctrl.Result{}, statusErr
+			}
+			return ctrl.Result{RequeueAfter: holderRequeue}, nil
+		}
+	}
+
 	msg := fmt.Sprintf("CronJob %s is synced", cron.Name)
-	return ctrl.Result{}, r.setStatus(ctx, backup, karkivev1alpha1.BackupPhaseReady, metav1.ConditionTrue, "Synced", msg, corev1.EventTypeNormal, cron)
+	return ctrl.Result{}, r.setStatus(ctx, backup, karkivev1alpha1.BackupPhaseReady, metav1.ConditionTrue, "Synced", msg, corev1.EventTypeNormal, cron, statusHolder)
 }
 
 func (r *BackupReconciler) fail(ctx context.Context, backup *karkivev1alpha1.Backup, reason string, err error) error {
-	if statusErr := r.setStatus(ctx, backup, karkivev1alpha1.BackupPhaseError, metav1.ConditionFalse, reason, err.Error(), corev1.EventTypeWarning, nil); statusErr != nil {
+	if statusErr := r.setStatus(ctx, backup, karkivev1alpha1.BackupPhaseError, metav1.ConditionFalse, reason, err.Error(), corev1.EventTypeWarning, nil, ""); statusErr != nil {
 		return statusErr
 	}
 	return err
@@ -148,6 +182,7 @@ func (r *BackupReconciler) setStatus(
 	ready metav1.ConditionStatus,
 	reason, message, eventType string,
 	cron *batchv1.CronJob,
+	holderName string,
 ) error {
 	specChanged := generationChanged(backup.Generation, backup.Status.ObservedGeneration, backup.Status.Phase)
 	phaseChanged := backup.Status.Phase != phase
@@ -163,6 +198,8 @@ func (r *BackupReconciler) setStatus(
 		backup.Status.LastScheduleTime = cron.Status.LastScheduleTime
 		backup.Status.LastSuccessfulTime = cron.Status.LastSuccessfulTime
 	}
+	holderChanged := backup.Status.VolumeHolderName != holderName
+	backup.Status.VolumeHolderName = holderName
 
 	readyChanged := meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
 		Type:               karkivev1alpha1.ConditionReady,
@@ -180,7 +217,7 @@ func (r *BackupReconciler) setStatus(
 	if r.Recorder != nil && shouldRecordEvent(eventType, specChanged, phaseChanged, readyChanged) {
 		r.Recorder.Event(backup, eventType, reason, message)
 	}
-	if !statusNeedsPatch(specChanged, phaseChanged, condChanged, lastJobChanged, cronChanged) {
+	if !statusNeedsPatch(specChanged, phaseChanged, condChanged, lastJobChanged, cronChanged || holderChanged) {
 		return nil
 	}
 	return r.Status().Update(ctx, backup)
@@ -192,6 +229,7 @@ func (r *BackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&batchv1.CronJob{}).
 		Owns(&corev1.ConfigMap{}).
 		Owns(&corev1.PersistentVolumeClaim{}).
+		Owns(&appsv1.Deployment{}).
 		Watches(&batchv1.Job{}, handler.EnqueueRequestsFromMapFunc(mapJobToOwner(resources.KindBackup, resources.LabelBackupName))).
 		Complete(r)
 }

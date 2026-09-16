@@ -14,6 +14,7 @@ const (
 	LabelRestoreName  = "karkive.io/restore"
 	LabelEngine       = "karkive.io/engine"
 	LabelKind         = "karkive.io/kind"
+	LabelRuntimeRole  = "karkive.io/runtime-role"
 
 	ManagedBy = "karkive"
 	PartOf    = "karkive"

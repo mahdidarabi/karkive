@@ -22,3 +22,6 @@ spec:
     size: 1Gi
     storageClassName: standard
   localRetentionDays: 7
+  # runtime:
+  #   mode: CronJobWithVolumeHolder
+

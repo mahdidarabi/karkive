@@ -126,6 +126,61 @@ type SecretKeySelector struct {
 	PasswordKey string `json:"passwordKey,omitempty"`
 }
 
+// RuntimeMode selects how pipeline pods are scheduled relative to the PVC.
+// +kubebuilder:validation:Enum=CronJob;CronJobWithVolumeHolder;PersistentPodWithTriggerJob;PersistentPodWithInPodCron
+type RuntimeMode string
+
+const (
+	// RuntimeModeCronJob is a new Job pod every schedule (CSI attach/detach each run). Default.
+	RuntimeModeCronJob RuntimeMode = "CronJob"
+	// RuntimeModeCronJobWithVolumeHolder keeps a pause Deployment that holds the
+	// PVC attached on one node. Job pods colocate with required podAffinity and
+	// only NodePublish. Use when re-attaching the claim after a Job exits fails
+	// even though no consumer pod exists (not an RWX / multi-writer issue).
+	RuntimeModeCronJobWithVolumeHolder RuntimeMode = "CronJobWithVolumeHolder"
+	// RuntimeModePersistentPodWithTriggerJob is reserved (not implemented).
+	RuntimeModePersistentPodWithTriggerJob RuntimeMode = "PersistentPodWithTriggerJob"
+	// RuntimeModePersistentPodWithInPodCron is reserved (not implemented).
+	RuntimeModePersistentPodWithInPodCron RuntimeMode = "PersistentPodWithInPodCron"
+)
+
+// RuntimeSpec selects the Backup/Restore pod runtime.
+type RuntimeSpec struct {
+	// Mode is the pod runtime. Default CronJob.
+	//
+	// CronJob: existing behaviour — CronJob creates a Job pod per run; the PVC
+	// is attached and detached every time.
+	//
+	// CronJobWithVolumeHolder: same CronJob pipeline, plus a 1-replica pause
+	// Deployment that keeps the PVC attached. Job pods must schedule on that
+	// node (required podAffinity). Persistence must stay enabled.
+	//
+	// PersistentPodWithTriggerJob: not implemented. Long-lived pipeline
+	// Deployment (PVC stays mounted) plus a PVC-less trigger CronJob that
+	// writes a run token and waits for a result ConfigMap.
+	// Implementation notes: scratch must be $DATA_ROOT/run-$RUN_ID (HOSTNAME is
+	// stable; already_done_hold would skip later runs). Stages must loop on the
+	// token and must not exit after .step-job-done (Deployment restart would
+	// skip work). Trigger Job needs a Role limited to the run/result ConfigMaps.
+	// Idle memory is all stage requests; prefer CronJobWithVolumeHolder for
+	// rare restores.
+	//
+	// PersistentPodWithInPodCron: not implemented. Same long-lived pipeline
+	// pod, but a sidecar (e.g. supercronic) fires the run token. No CronJob;
+	// kubectl create job --from=… goes away; last-run status cannot use Job
+	// objects unless a result ConfigMap is added.
+	// +kubebuilder:default=CronJob
+	Mode RuntimeMode `json:"mode,omitempty"`
+}
+
+// EffectiveMode is CronJob when Runtime is nil or Mode is empty.
+func (r *RuntimeSpec) EffectiveMode() RuntimeMode {
+	if r == nil || r.Mode == "" {
+		return RuntimeModeCronJob
+	}
+	return r.Mode
+}
+
 // JobPolicy maps onto CronJob / Job fields.
 type JobPolicy struct {
 	// ConcurrencyPolicy of the CronJob. Default Forbid.

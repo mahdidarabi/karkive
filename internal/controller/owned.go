@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -16,14 +17,17 @@ import (
 	"github.com/mahdidarabi/KArkive/internal/resources"
 )
 
-// ownedResources is the ConfigMap + optional PVC + CronJob for one Backup or Restore.
+// ownedResources is the ConfigMap + optional PVC + CronJob (+ optional holder) for one Backup or Restore.
 type ownedResources struct {
-	Owner           client.Object
-	Name            string
-	Persistence     *karkivev1alpha1.PersistenceSpec
-	Labels          map[string]string
-	MutateConfigMap func(*corev1.ConfigMap) error
-	MutateCronJob   func(*batchv1.CronJob)
+	Owner              client.Object
+	Name               string
+	Persistence        *karkivev1alpha1.PersistenceSpec
+	Labels             map[string]string
+	VolumeHolder       bool
+	HolderName         string
+	MutateConfigMap    func(*corev1.ConfigMap) error
+	MutateCronJob      func(*batchv1.CronJob)
+	MutateVolumeHolder func(*appsv1.Deployment)
 }
 
 type ownedApplyError struct {
@@ -49,7 +53,8 @@ func applyOwnedError(reason string, err error) error {
 	return &ownedApplyError{Reason: reason, Err: err}
 }
 
-// ensureOwned creates or updates the ConfigMap, optional PVC, and CronJob for a CR.
+// ensureOwned creates or updates the ConfigMap, optional PVC, optional volume
+// holder Deployment, and CronJob for a CR.
 func ensureOwned(ctx context.Context, c client.Client, scheme *runtime.Scheme, spec ownedResources) (*batchv1.CronJob, error) {
 	ns := spec.Owner.GetNamespace()
 	setOwner := func(obj client.Object) error {
@@ -77,6 +82,22 @@ func ensureOwned(ctx context.Context, c client.Client, scheme *runtime.Scheme, s
 			return setOwner(pvc)
 		}); err != nil {
 			return nil, applyOwnedError("PVCError", err)
+		}
+	}
+
+	if spec.VolumeHolder {
+		deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: spec.HolderName, Namespace: ns}}
+		if _, err := controllerutil.CreateOrUpdate(ctx, c, deploy, func() error {
+			spec.MutateVolumeHolder(deploy)
+			return setOwner(deploy)
+		}); err != nil {
+			return nil, applyOwnedError("VolumeHolderError", err)
+		}
+	} else if spec.HolderName != "" {
+		if _, err := deleteIfController(ctx, c, spec.Owner, &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{Name: spec.HolderName, Namespace: ns},
+		}); err != nil {
+			return nil, applyOwnedError("VolumeHolderCleanupError", err)
 		}
 	}
 
@@ -137,4 +158,8 @@ func deleteIfController(ctx context.Context, c client.Client, owner client.Objec
 		return false, client.IgnoreNotFound(err)
 	}
 	return true, nil
+}
+
+func volumeHolderAvailable(deploy *appsv1.Deployment) bool {
+	return deploy.Status.AvailableReplicas >= 1
 }

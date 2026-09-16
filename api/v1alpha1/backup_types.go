@@ -65,6 +65,12 @@ type BackupSpec struct {
 	// Job tunes CronJob/Job behaviour.
 	Job *JobPolicy `json:"job,omitempty"`
 
+	// Runtime selects how pipeline pods are scheduled relative to the PVC.
+	// Default mode CronJob. CronJobWithVolumeHolder is implemented.
+	// PersistentPodWithTriggerJob and PersistentPodWithInPodCron are rejected
+	// until implemented.
+	Runtime *RuntimeSpec `json:"runtime,omitempty"`
+
 	// Component is the app.kubernetes.io/component label. Defaults to metadata.name.
 	Component string `json:"component,omitempty"`
 }
@@ -87,6 +93,10 @@ type BackupStatus struct {
 
 	// CronJobName is the owned CronJob.
 	CronJobName string `json:"cronJobName,omitempty"`
+
+	// VolumeHolderName is the pause Deployment that keeps the PVC attached.
+	// Empty unless spec.runtime.mode is CronJobWithVolumeHolder.
+	VolumeHolderName string `json:"volumeHolderName,omitempty"`
 
 	// LastScheduleTime copied from the CronJob.
 	LastScheduleTime *metav1.Time `json:"lastScheduleTime,omitempty"`

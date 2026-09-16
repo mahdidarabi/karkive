@@ -41,6 +41,25 @@ func TestValidateBackupSpec(t *testing.T) {
 	if err := ValidateBackupSpec(noPath); err == nil {
 		t.Fatal("expected s3.path when S3 is enabled")
 	}
+
+	holder := ok
+	holder.Runtime = &RuntimeSpec{Mode: RuntimeModeCronJobWithVolumeHolder}
+	if err := ValidateBackupSpec(holder); err != nil {
+		t.Fatal(err)
+	}
+	holder.Persistence = &PersistenceSpec{Enabled: boolPtr(false)}
+	if err := ValidateBackupSpec(holder); err == nil {
+		t.Fatal("expected persistence for CronJobWithVolumeHolder")
+	}
+	unimpl := ok
+	unimpl.Runtime = &RuntimeSpec{Mode: RuntimeModePersistentPodWithTriggerJob}
+	if err := ValidateBackupSpec(unimpl); err == nil {
+		t.Fatal("expected reject for PersistentPodWithTriggerJob")
+	}
+	unimpl.Runtime.Mode = RuntimeModePersistentPodWithInPodCron
+	if err := ValidateBackupSpec(unimpl); err == nil {
+		t.Fatal("expected reject for PersistentPodWithInPodCron")
+	}
 }
 
 func TestValidateRestoreSpec(t *testing.T) {
@@ -69,6 +88,12 @@ func TestValidateRestoreSpec(t *testing.T) {
 	disabled.S3.Enabled = boolPtr(false)
 	if err := ValidateRestoreSpec(disabled); err == nil {
 		t.Fatal("expected reject when restore s3.enabled is false")
+	}
+	lite := ok
+	lite.Persistence = &PersistenceSpec{Enabled: boolPtr(false)}
+	lite.Runtime = &RuntimeSpec{Mode: RuntimeModeCronJobWithVolumeHolder}
+	if err := ValidateRestoreSpec(lite); err == nil {
+		t.Fatal("expected reject VolumeHolder without persistence")
 	}
 }
 

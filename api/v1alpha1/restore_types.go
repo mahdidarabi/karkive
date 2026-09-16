@@ -82,6 +82,12 @@ type RestoreSpec struct {
 	// Job tunes CronJob/Job behaviour.
 	Job *JobPolicy `json:"job,omitempty"`
 
+	// Runtime selects how pipeline pods are scheduled relative to the PVC.
+	// Default mode CronJob. CronJobWithVolumeHolder is implemented.
+	// PersistentPodWithTriggerJob and PersistentPodWithInPodCron are rejected
+	// until implemented.
+	Runtime *RuntimeSpec `json:"runtime,omitempty"`
+
 	// Component is the app.kubernetes.io/component label. Defaults to metadata.name.
 	Component string `json:"component,omitempty"`
 }
@@ -98,9 +104,16 @@ const (
 type RestoreStatus struct {
 	// Phase is admission of owned resources: Pending, Ready, Error, Unsupported.
 	// It is not the last Job outcome; see RestoreSucceeded.
-	Phase              string       `json:"phase,omitempty"`
-	ObservedGeneration int64        `json:"observedGeneration,omitempty"`
-	CronJobName        string       `json:"cronJobName,omitempty"`
+	Phase string `json:"phase,omitempty"`
+
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	CronJobName string `json:"cronJobName,omitempty"`
+
+	// VolumeHolderName is the pause Deployment that keeps the PVC attached.
+	// Empty unless spec.runtime.mode is CronJobWithVolumeHolder.
+	VolumeHolderName string `json:"volumeHolderName,omitempty"`
+
 	LastScheduleTime   *metav1.Time `json:"lastScheduleTime,omitempty"`
 	LastSuccessfulTime *metav1.Time `json:"lastSuccessfulTime,omitempty"`
 	// LastJob is the most recently finished Job, including failure reason.

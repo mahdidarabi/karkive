@@ -74,6 +74,9 @@ func MutateBackupCronJob(cj *batchv1.CronJob, backup *karkivev1alpha1.Backup, cf
 		Containers:      containers,
 		Volumes:         backupVolumes(backup, secret),
 	}
+	if NeedsVolumeHolder(backup.Spec.Runtime) {
+		applyVolumeHolderAffinity(&podSpec, VolumeHolderMatchLabels(KindBackup, backup.Name))
+	}
 
 	cj.Labels = labels
 	cj.Spec = batchv1.CronJobSpec{
