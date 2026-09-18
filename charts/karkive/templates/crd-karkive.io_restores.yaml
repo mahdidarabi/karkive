@@ -703,8 +703,9 @@ spec:
                 type: object
                 x-kubernetes-map-type: atomic
               stripPgAuditExtension:
-                description: StripPgAuditExtension removes pgAudit DDL from dumps.
-                  Default true.
+                description: |-
+                  StripPgAuditExtension removes pgAudit extension, event-trigger, and
+                  function DDL from dumps. Default true.
                 type: boolean
               suspend:
                 description: Suspend stops scheduled runs. The CronJob remains for

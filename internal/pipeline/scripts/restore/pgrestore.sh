@@ -27,45 +27,57 @@ strip_pgaudit_enabled() {
   esac
 }
 
+# pg_dump --quote-all-identifiers emits these even after CREATE EXTENSION is
+# stripped: event triggers EXECUTE the C functions, and GRANT/REVOKE target
+# them. Restore targets often do not preload pgaudit, so the functions are absent.
+strip_pgaudit_ddl() {
+  sed -E \
+    -e '/^DROP EXTENSION([[:space:]]+IF[[:space:]]+EXISTS)?[[:space:]]+("pgaudit"|pgaudit)/d' \
+    -e '/^CREATE EXTENSION([[:space:]]+IF[[:space:]]+NOT[[:space:]]+EXISTS)?[[:space:]]+("pgaudit"|pgaudit)/d' \
+    -e '/^COMMENT ON EXTENSION[[:space:]]+("pgaudit"|pgaudit)/d' \
+    -e '/^DROP EVENT TRIGGER([[:space:]]+IF[[:space:]]+EXISTS)?[[:space:]]+"?pgaudit_/d' \
+    -e '/^CREATE EVENT TRIGGER[[:space:]]+"?pgaudit_/,/;[[:space:]]*$/d' \
+    -e '/^ALTER EVENT TRIGGER[[:space:]]+"?pgaudit_/d' \
+    -e '/^COMMENT ON EVENT TRIGGER[[:space:]]+"?pgaudit_/d' \
+    -e '/^DROP FUNCTION([[:space:]]+IF[[:space:]]+EXISTS)?[[:space:]].*pgaudit_(ddl_command_end|sql_drop)/d' \
+    -e '/^CREATE FUNCTION[[:space:]].*pgaudit_(ddl_command_end|sql_drop)/,/;[[:space:]]*$/d' \
+    -e '/^ALTER FUNCTION[[:space:]].*pgaudit_(ddl_command_end|sql_drop)/,/;[[:space:]]*$/d' \
+    -e '/^COMMENT ON FUNCTION[[:space:]].*pgaudit_(ddl_command_end|sql_drop)/d' \
+    -e '/^GRANT[[:space:]].*ON FUNCTION[[:space:]].*pgaudit_(ddl_command_end|sql_drop)/d' \
+    -e '/^REVOKE[[:space:]].*ON FUNCTION[[:space:]].*pgaudit_(ddl_command_end|sql_drop)/d'
+}
+
+strip_timescale_ddl() {
+  sed -E \
+    -e '/^DROP EXTENSION([[:space:]]+IF[[:space:]]+EXISTS)?[[:space:]]+("timescaledb"|timescaledb)/d' \
+    -e '/^CREATE EXTENSION([[:space:]]+IF[[:space:]]+NOT[[:space:]]+EXISTS)?[[:space:]]+("timescaledb"|timescaledb)/d' \
+    -e '/^COMMENT ON EXTENSION[[:space:]]+("timescaledb"|timescaledb)/d'
+}
+
+strip_pgdump_client_meta() {
+  sed -E \
+    -e '/^SET[[:space:]]+transaction_timeout[[:space:]]*=/d' \
+    -e '/^\\restrict([[:space:]]|$)/d' \
+    -e '/^\\unrestrict([[:space:]]|$)/d'
+}
+
 filter_dump() {
   out="$1"
   strip_timescale="$2"
-  if [ "$strip_timescale" -eq 1 ] && strip_pgaudit_enabled; then
-    sed -E \
-      -e '/^SET[[:space:]]+transaction_timeout[[:space:]]*=/d' \
-      -e '/^\\restrict([[:space:]]|$)/d' \
-      -e '/^\\unrestrict([[:space:]]|$)/d' \
-      -e '/^DROP EXTENSION([[:space:]]+IF[[:space:]]+EXISTS)?[[:space:]]+("pgaudit"|pgaudit)/d' \
-      -e '/^CREATE EXTENSION([[:space:]]+IF[[:space:]]+NOT[[:space:]]+EXISTS)?[[:space:]]+("pgaudit"|pgaudit)/d' \
-      -e '/^COMMENT ON EXTENSION[[:space:]]+("pgaudit"|pgaudit)/d' \
-      -e '/^DROP EXTENSION([[:space:]]+IF[[:space:]]+EXISTS)?[[:space:]]+("timescaledb"|timescaledb)/d' \
-      -e '/^CREATE EXTENSION([[:space:]]+IF[[:space:]]+NOT[[:space:]]+EXISTS)?[[:space:]]+("timescaledb"|timescaledb)/d' \
-      -e '/^COMMENT ON EXTENSION[[:space:]]+("timescaledb"|timescaledb)/d' \
-      "$DUMP" > "$out"
-  elif [ "$strip_timescale" -eq 1 ]; then
-    sed -E \
-      -e '/^SET[[:space:]]+transaction_timeout[[:space:]]*=/d' \
-      -e '/^\\restrict([[:space:]]|$)/d' \
-      -e '/^\\unrestrict([[:space:]]|$)/d' \
-      -e '/^DROP EXTENSION([[:space:]]+IF[[:space:]]+EXISTS)?[[:space:]]+("timescaledb"|timescaledb)/d' \
-      -e '/^CREATE EXTENSION([[:space:]]+IF[[:space:]]+NOT[[:space:]]+EXISTS)?[[:space:]]+("timescaledb"|timescaledb)/d' \
-      -e '/^COMMENT ON EXTENSION[[:space:]]+("timescaledb"|timescaledb)/d' \
-      "$DUMP" > "$out"
-  elif strip_pgaudit_enabled; then
-    sed -E \
-      -e '/^SET[[:space:]]+transaction_timeout[[:space:]]*=/d' \
-      -e '/^\\restrict([[:space:]]|$)/d' \
-      -e '/^\\unrestrict([[:space:]]|$)/d' \
-      -e '/^DROP EXTENSION([[:space:]]+IF[[:space:]]+EXISTS)?[[:space:]]+("pgaudit"|pgaudit)/d' \
-      -e '/^CREATE EXTENSION([[:space:]]+IF[[:space:]]+NOT[[:space:]]+EXISTS)?[[:space:]]+("pgaudit"|pgaudit)/d' \
-      -e '/^COMMENT ON EXTENSION[[:space:]]+("pgaudit"|pgaudit)/d' \
-      "$DUMP" > "$out"
+  # Dash /bin/sh has no pipefail; each stage reads a real file.
+  meta="${out}.meta"
+  strip_pgdump_client_meta < "$DUMP" > "$meta"
+  if strip_pgaudit_enabled; then
+    next="${out}.pgaudit"
+    strip_pgaudit_ddl < "$meta" > "$next"
+    rm -f "$meta"
+    meta="$next"
+  fi
+  if [ "$strip_timescale" -eq 1 ]; then
+    strip_timescale_ddl < "$meta" > "$out"
+    rm -f "$meta"
   else
-    sed -E \
-      -e '/^SET[[:space:]]+transaction_timeout[[:space:]]*=/d' \
-      -e '/^\\restrict([[:space:]]|$)/d' \
-      -e '/^\\unrestrict([[:space:]]|$)/d' \
-      "$DUMP" > "$out"
+    mv "$meta" "$out"
   fi
 }
 
@@ -141,13 +153,15 @@ log "ensuring roles referenced in dump exist (OWNER TO / GRANT / FOR ROLE)"
 log "applying pg_dump SQL into ${PGDATABASE}"
 # Newer pg_dump may emit SQL/meta unknown to older psql clients:
 # transaction_timeout (PG17+) and \restrict/\unrestrict (PG17+).
-# pgAudit extension DDL is optional (STRIP_PGAUDIT_EXTENSION); sandbox targets
+# pgAudit objects are optional (STRIP_PGAUDIT_EXTENSION); restore targets
 # usually lack shared_preload_libraries=pgaudit.
 FILTERED="${WORKDIR}/dump.filtered"
 if strip_pgaudit_enabled \
   && { grep -Eq 'CREATE EXTENSION.*(pgaudit|"pgaudit")' "$DUMP" \
-    || grep -Eq 'DROP EXTENSION.*(pgaudit|"pgaudit")' "$DUMP"; }; then
-  log "pgAudit extension in dump; STRIP_PGAUDIT_EXTENSION=${STRIP_PGAUDIT_EXTENSION}; stripping extension DDL"
+    || grep -Eq 'DROP EXTENSION.*(pgaudit|"pgaudit")' "$DUMP" \
+    || grep -Eq 'EVENT TRIGGER[[:space:]]+"?pgaudit_' "$DUMP" \
+    || grep -Eq 'FUNCTION[[:space:]].*pgaudit_(ddl_command_end|sql_drop)' "$DUMP"; }; then
+  log "pgAudit objects in dump; STRIP_PGAUDIT_EXTENSION=${STRIP_PGAUDIT_EXTENSION}; stripping extension/event-trigger/function DDL"
 fi
 IS_TIMESCALE=0
 if grep -Eq 'CREATE EXTENSION.*(timescaledb|"timescaledb")' "$DUMP" \

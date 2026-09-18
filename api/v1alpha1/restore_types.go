@@ -70,7 +70,8 @@ type RestoreSpec struct {
 	// DropDatabaseIfExists drops a non-empty target before restore. Default true.
 	DropDatabaseIfExists *bool `json:"dropDatabaseIfExists,omitempty"`
 
-	// StripPgAuditExtension removes pgAudit DDL from dumps. Default true.
+	// StripPgAuditExtension removes pgAudit extension, event-trigger, and
+	// function DDL from dumps. Default true.
 	StripPgAuditExtension *bool `json:"stripPgAuditExtension,omitempty"`
 
 	// Images overrides operator-wide default images.

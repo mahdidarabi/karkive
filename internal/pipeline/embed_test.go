@@ -128,6 +128,24 @@ func TestEncryptHonorsS3Enabled(t *testing.T) {
 	}
 }
 
+func TestPgRestoreStripsPgAuditEventTriggers(t *testing.T) {
+	s, err := RestoreScript("pgrestore.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"strip_pgaudit_ddl",
+		"CREATE EVENT TRIGGER",
+		"pgaudit_(ddl_command_end|sql_drop)",
+		"GRANT[[:space:]].*ON FUNCTION",
+		"REVOKE[[:space:]].*ON FUNCTION",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("pgrestore.sh missing %q", want)
+		}
+	}
+}
+
 func TestPgDumpDisablesStatementTimeout(t *testing.T) {
 	s, err := BackupScript("pgdump.sh")
 	if err != nil {
