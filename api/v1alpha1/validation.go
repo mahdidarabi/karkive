@@ -2,10 +2,12 @@ package v1alpha1
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/robfig/cron/v3"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // ValidateBackupSpec checks Backup fields the operator can evaluate without the cluster.
@@ -13,11 +15,20 @@ func ValidateBackupSpec(spec BackupSpec) error {
 	if err := validateSchedule(spec.Schedule); err != nil {
 		return err
 	}
-	if spec.Database.Host == "" {
-		return fmt.Errorf("spec.database.host is required")
-	}
-	if spec.Database.Name == "" {
-		return fmt.Errorf("spec.database.name is required")
+	if spec.Engine == EnginePVC {
+		if err := validatePVCSource(spec.PVC); err != nil {
+			return err
+		}
+	} else {
+		if spec.PVC != nil {
+			return fmt.Errorf("spec.pvc is only valid with engine pvc")
+		}
+		if spec.Database.Host == "" {
+			return fmt.Errorf("spec.database.host is required")
+		}
+		if spec.Database.Name == "" {
+			return fmt.Errorf("spec.database.name is required")
+		}
 	}
 	if spec.S3.EnabledOrDefault() {
 		if spec.S3.Path == "" {
@@ -42,6 +53,9 @@ func ValidateBackupSpec(spec BackupSpec) error {
 func ValidateRestoreSpec(spec RestoreSpec) error {
 	if err := validateSchedule(spec.Schedule); err != nil {
 		return err
+	}
+	if spec.Engine == EnginePVC {
+		return fmt.Errorf("engine pvc is backup-only; restore a PVC archive manually (gpg --decrypt | tar -x)")
 	}
 	if spec.Database.Host == "" {
 		return fmt.Errorf("spec.database.host is required")
@@ -87,6 +101,35 @@ func validateSchedule(schedule string) error {
 	}
 	if _, err := cron.ParseStandard(schedule); err != nil {
 		return fmt.Errorf("spec.schedule is not a valid cron expression: %w", err)
+	}
+	return nil
+}
+
+func validatePVCSource(src *PVCSourceSpec) error {
+	if src == nil || src.ClaimName == "" {
+		return fmt.Errorf("spec.pvc.claimName is required for engine pvc")
+	}
+	if p := src.Path; p != "" {
+		if strings.HasPrefix(p, "/") || slices.Contains(strings.Split(p, "/"), "..") {
+			return fmt.Errorf("spec.pvc.path must be relative to the claim root without .. segments")
+		}
+		if strings.ContainsAny(p, "\n\r") {
+			return fmt.Errorf("spec.pvc.path must not contain newlines")
+		}
+	}
+	for _, e := range src.Excludes {
+		// Patterns reach tar newline-separated (--exclude-from).
+		if strings.TrimSpace(e) == "" || strings.ContainsAny(e, "\n\r") {
+			return fmt.Errorf("spec.pvc.excludes entries must be non-empty single-line patterns")
+		}
+	}
+	if sel := src.ConsumerSelector; sel != nil {
+		if len(sel.MatchLabels) == 0 && len(sel.MatchExpressions) == 0 {
+			return fmt.Errorf("spec.pvc.consumerSelector must set matchLabels or matchExpressions (empty matches every pod)")
+		}
+		if _, err := metav1.LabelSelectorAsSelector(sel); err != nil {
+			return fmt.Errorf("spec.pvc.consumerSelector is invalid: %w", err)
+		}
 	}
 	return nil
 }

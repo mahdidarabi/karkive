@@ -63,7 +63,7 @@ func MutateRestoreCronJob(cj *batchv1.CronJob, restore *karkivev1alpha1.Restore,
 		Volumes: restoreVolumes(restore, secret),
 	}
 	if NeedsVolumeHolder(restore.Spec.Runtime) {
-		applyVolumeHolderAffinity(&podSpec, VolumeHolderMatchLabels(KindRestore, restore.Name))
+		podSpec.Affinity = RequiredPodAffinity(VolumeHolderAffinityTerm(VolumeHolderMatchLabels(KindRestore, restore.Name)))
 	}
 
 	cj.Labels = labels

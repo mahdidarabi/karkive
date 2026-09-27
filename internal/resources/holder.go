@@ -26,6 +26,9 @@ type VolumeHolderSpec struct {
 	ClaimName string
 	MountPath string
 	Images    *karkivev1alpha1.ImageSet
+	// Affinity pins the holder next to other pods (engine pvc: the source
+	// claim's consumers), so Job pods can satisfy both affinities on one node.
+	Affinity *corev1.Affinity
 }
 
 // MutateVolumeHolderDeployment writes a 1-replica Recreate pause pod on the PVC.
@@ -57,6 +60,7 @@ func MutateVolumeHolderDeployment(deploy *appsv1.Deployment, spec VolumeHolderSp
 				AutomountServiceAccountToken:  ptr.To(false),
 				RestartPolicy:                 corev1.RestartPolicyAlways,
 				SecurityContext:               PodSecurityContext(),
+				Affinity:                      spec.Affinity,
 				TerminationGracePeriodSeconds: ptr.To(int64(5)),
 				Containers: []corev1.Container{{
 					Name:            volumeHolderContainer,

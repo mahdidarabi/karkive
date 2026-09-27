@@ -44,8 +44,8 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: Backup describes a scheduled logical backup pipeline (dump →
-          gzip → gpg → optional S3).
+        description: Backup describes a scheduled backup pipeline (database dump or
+          PVC tar → gzip → gpg → optional S3).
         properties:
           apiVersion:
             description: |-
@@ -75,15 +75,20 @@ spec:
                 description: DataDir is the volume mount path. Default /backup/data.
                 type: string
               database:
-                description: Database connection (non-secret fields).
+                description: |-
+                  Database connection (non-secret fields). Required for postgres, mariadb,
+                  and redis; unused for pvc.
                 properties:
                   host:
-                    description: Host is the DNS name or IP of the database (required).
+                    description: |-
+                      Host is the DNS name or IP of the database. Required for postgres,
+                      mariadb, and redis (checked by the webhook and controller).
                     minLength: 1
                     type: string
                   name:
-                    description: Name is the database name (postgres/mariadb) or a
-                      logical label (redis).
+                    description: |-
+                      Name is the database name (postgres/mariadb) or a logical label (redis).
+                      Required for postgres, mariadb, and redis.
                     minLength: 1
                     type: string
                   ownerRole:
@@ -97,9 +102,6 @@ spec:
                     maximum: 65535
                     minimum: 1
                     type: integer
-                required:
-                - host
-                - name
                 type: object
               engine:
                 default: postgres
@@ -108,6 +110,7 @@ spec:
                 - postgres
                 - mariadb
                 - redis
+                - pvc
                 type: string
               images:
                 description: Images overrides operator-wide default images.
@@ -166,6 +169,17 @@ spec:
                     type: object
                   redis:
                     description: Redis is used for redis-cli dump and restore.
+                    properties:
+                      image:
+                        description: Image is registry/repository:tag.
+                        type: string
+                      pullPolicy:
+                        description: PullPolicy for the container. Default IfNotPresent.
+                        type: string
+                    type: object
+                  tar:
+                    description: Tar must provide GNU tar; used by the pvcdump stage
+                      (engine pvc).
                     properties:
                       image:
                         description: Image is registry/repository:tag.
@@ -255,6 +269,100 @@ spec:
                     description: StorageClassName of the PVC. Empty uses the cluster
                       default.
                     type: string
+                type: object
+              pvc:
+                description: PVC is the claim to archive. Required for engine pvc;
+                  rejected otherwise.
+                properties:
+                  claimName:
+                    description: |-
+                      ClaimName of the source PVC. It must be in the Backup's namespace.
+                      The claim is mounted read-only, and only into the pvcdump container.
+                      ReadWriteOncePod claims cannot be mounted next to their consumer.
+                    minLength: 1
+                    type: string
+                  consumerSelector:
+                    description: |-
+                      ConsumerSelector matches the pods that already mount the claim. Job
+                      pods (and the volume holder) then get required podAffinity to them on
+                      kubernetes.io/hostname, so a ReadWriteOnce claim is mounted on the node
+                      it is attached to. Leave unset for RWX claims or claims with no running
+                      consumer. While set, Jobs stay Pending if no matching pod is running.
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: |-
+                            A label selector requirement is a selector that contains values, a key, and an operator that
+                            relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: |-
+                                operator represents a key's relationship to a set of values.
+                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: |-
+                                values is an array of string values. If the operator is In or NotIn,
+                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced during a strategic
+                                merge patch.
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  excludes:
+                    description: |-
+                      Excludes are GNU tar --exclude patterns matched against member names
+                      such as ./cache/file. A bare name (cache) matches at any depth;
+                      ./cache matches only the top-level entry.
+                    items:
+                      type: string
+                    type: array
+                  path:
+                    description: |-
+                      Path inside the claim to archive, relative to its root (no leading /
+                      and no .. segments). Default: the whole claim.
+                    type: string
+                  runAsGroup:
+                    description: RunAsGroup of the pvcdump container. Defaults to
+                      RunAsUser.
+                    format: int64
+                    minimum: 0
+                    type: integer
+                  runAsUser:
+                    description: |-
+                      RunAsUser of the pvcdump container. Unset (or 0) runs tar as root with
+                      only CAP_DAC_OVERRIDE, so it can read files of any owner and mode; the
+                      source mount is read-only. Set a non-root UID (for example the app's)
+                      where Pod Security "restricted" forbids root; tar then reads only what
+                      that UID can read, and unreadable files fail the backup.
+                    format: int64
+                    minimum: 0
+                    type: integer
+                required:
+                - claimName
                 type: object
               resources:
                 description: Resources overrides per-stage resource requests/limits.
@@ -380,8 +488,8 @@ spec:
                         type: object
                     type: object
                   dump:
-                    description: ResourceRequirements describes the compute resource
-                      requirements.
+                    description: Dump is pgdump, mysqldump, redisdump, or pvcdump
+                      (tar).
                     properties:
                       claims:
                         description: |-
@@ -640,8 +748,9 @@ spec:
                 type: string
               secretRef:
                 description: |-
-                  SecretRef is a Secret in the same namespace with keys:
-                  username, password, gpg_passphrase, and (when s3.enabled) s3_access_key, s3_secret_key.
+                  SecretRef is a Secret in the same namespace with keys: gpg_passphrase;
+                  username and password (not for engine pvc); and (when s3.enabled)
+                  s3_access_key, s3_secret_key.
                 properties:
                   name:
                     default: ""
@@ -660,7 +769,6 @@ spec:
                   `kubectl create job --from=cronjob/karkive-backup-<name>`.
                 type: boolean
             required:
-            - database
             - s3
             - schedule
             - secretRef

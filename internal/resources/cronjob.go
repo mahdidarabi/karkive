@@ -24,6 +24,7 @@ const (
 
 // MutateBackupCronJob writes the backup pipeline CronJob.
 // Stage order: cleanup → dump → compress → encrypt → s3-sync (s3-sync omitted when s3.enabled=false).
+// For engine pvc the dump stage is pvcdump (tar of the read-only source claim).
 func MutateBackupCronJob(cj *batchv1.CronJob, backup *karkivev1alpha1.Backup, cfg config.Config) {
 	job := backup.Spec.Job
 	if job == nil {
@@ -68,14 +69,17 @@ func MutateBackupCronJob(cj *batchv1.CronJob, backup *karkivev1alpha1.Backup, cf
 		containers = append(containers, s3SyncContainer(mcImg, mcPull, s3Res, cmName, secret))
 	}
 
+	var affinity []corev1.PodAffinityTerm
+	if NeedsVolumeHolder(backup.Spec.Runtime) {
+		affinity = append(affinity, VolumeHolderAffinityTerm(VolumeHolderMatchLabels(KindBackup, backup.Name)))
+	}
+	affinity = append(affinity, PVCConsumerAffinityTerms(backup)...)
 	podSpec := corev1.PodSpec{
 		RestartPolicy:   restart,
 		SecurityContext: PodSecurityContext(),
+		Affinity:        RequiredPodAffinity(affinity...),
 		Containers:      containers,
 		Volumes:         backupVolumes(backup, secret),
-	}
-	if NeedsVolumeHolder(backup.Spec.Runtime) {
-		applyVolumeHolderAffinity(&podSpec, VolumeHolderMatchLabels(KindBackup, backup.Name))
 	}
 
 	cj.Labels = labels
@@ -137,6 +141,8 @@ func dumpContainer(
 			secretEnv("REDIS_PASSWORD", secret, "password"),
 		)
 		return c
+	case karkivev1alpha1.EnginePVC:
+		return pvcDumpContainer(backup, cfg, res, cmName)
 	default:
 		img, pull := postgresImage(backup.Spec.Images, cfg)
 		c := newScriptContainer(scriptOpts{
@@ -250,7 +256,7 @@ func backupVolumes(backup *karkivev1alpha1.Backup, secret string) []corev1.Volum
 		}
 	}
 
-	return []corev1.Volume{
+	volumes := []corev1.Volume{
 		{Name: volumeDataDir, VolumeSource: datadir},
 		{Name: volumeTmp, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 		{
@@ -266,4 +272,8 @@ func backupVolumes(backup *karkivev1alpha1.Backup, secret string) []corev1.Volum
 			},
 		},
 	}
+	if IsPVCBackup(backup) {
+		volumes = append(volumes, pvcSourceVolume(backup))
+	}
+	return volumes
 }

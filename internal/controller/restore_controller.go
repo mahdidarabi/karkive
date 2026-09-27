@@ -60,7 +60,7 @@ func (r *RestoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
-	if !resources.EngineImplemented(restore.Spec.Engine) {
+	if !resources.RestoreEngineImplemented(restore.Spec.Engine) {
 		engine := resources.EffectiveEngine(restore.Spec.Engine)
 		msg := fmt.Sprintf("engine %q is not implemented", engine)
 		logger.Info(msg)

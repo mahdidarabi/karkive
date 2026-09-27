@@ -7,11 +7,49 @@ import (
 
 // BackupResources overrides CPU/memory/ephemeral-storage per pipeline stage.
 type BackupResources struct {
-	Cleanup  *corev1.ResourceRequirements `json:"cleanup,omitempty"`
+	Cleanup *corev1.ResourceRequirements `json:"cleanup,omitempty"`
+	// Dump is pgdump, mysqldump, redisdump, or pvcdump (tar).
 	Dump     *corev1.ResourceRequirements `json:"dump,omitempty"`
 	Compress *corev1.ResourceRequirements `json:"compress,omitempty"`
 	Encrypt  *corev1.ResourceRequirements `json:"encrypt,omitempty"`
 	S3Sync   *corev1.ResourceRequirements `json:"s3Sync,omitempty"`
+}
+
+// PVCSourceSpec is the PersistentVolumeClaim that engine pvc archives with tar.
+type PVCSourceSpec struct {
+	// ClaimName of the source PVC. It must be in the Backup's namespace.
+	// The claim is mounted read-only, and only into the pvcdump container.
+	// ReadWriteOncePod claims cannot be mounted next to their consumer.
+	// +kubebuilder:validation:MinLength=1
+	ClaimName string `json:"claimName"`
+
+	// Path inside the claim to archive, relative to its root (no leading /
+	// and no .. segments). Default: the whole claim.
+	Path string `json:"path,omitempty"`
+
+	// Excludes are GNU tar --exclude patterns matched against member names
+	// such as ./cache/file. A bare name (cache) matches at any depth;
+	// ./cache matches only the top-level entry.
+	Excludes []string `json:"excludes,omitempty"`
+
+	// ConsumerSelector matches the pods that already mount the claim. Job
+	// pods (and the volume holder) then get required podAffinity to them on
+	// kubernetes.io/hostname, so a ReadWriteOnce claim is mounted on the node
+	// it is attached to. Leave unset for RWX claims or claims with no running
+	// consumer. While set, Jobs stay Pending if no matching pod is running.
+	ConsumerSelector *metav1.LabelSelector `json:"consumerSelector,omitempty"`
+
+	// RunAsUser of the pvcdump container. Unset (or 0) runs tar as root with
+	// only CAP_DAC_OVERRIDE, so it can read files of any owner and mode; the
+	// source mount is read-only. Set a non-root UID (for example the app's)
+	// where Pod Security "restricted" forbids root; tar then reads only what
+	// that UID can read, and unreadable files fail the backup.
+	// +kubebuilder:validation:Minimum=0
+	RunAsUser *int64 `json:"runAsUser,omitempty"`
+
+	// RunAsGroup of the pvcdump container. Defaults to RunAsUser.
+	// +kubebuilder:validation:Minimum=0
+	RunAsGroup *int64 `json:"runAsGroup,omitempty"`
 }
 
 // BackupSpec defines the desired state of Backup.
@@ -28,15 +66,20 @@ type BackupSpec struct {
 	// `kubectl create job --from=cronjob/karkive-backup-<name>`.
 	Suspend *bool `json:"suspend,omitempty"`
 
-	// Database connection (non-secret fields).
-	Database DatabaseSpec `json:"database"`
+	// Database connection (non-secret fields). Required for postgres, mariadb,
+	// and redis; unused for pvc.
+	Database DatabaseSpec `json:"database,omitempty"`
+
+	// PVC is the claim to archive. Required for engine pvc; rejected otherwise.
+	PVC *PVCSourceSpec `json:"pvc,omitempty"`
 
 	// S3 destination for encrypted dumps. Set enabled=false to keep dumps only
 	// in retained/ on the PVC (no s3-sync; S3 keys and endpoint/bucket not required).
 	S3 S3Spec `json:"s3"`
 
-	// SecretRef is a Secret in the same namespace with keys:
-	// username, password, gpg_passphrase, and (when s3.enabled) s3_access_key, s3_secret_key.
+	// SecretRef is a Secret in the same namespace with keys: gpg_passphrase;
+	// username and password (not for engine pvc); and (when s3.enabled)
+	// s3_access_key, s3_secret_key.
 	SecretRef corev1.LocalObjectReference `json:"secretRef"`
 
 	// Persistence for dump scratch + retained/. Default: PVC enabled, 1Gi.
@@ -128,7 +171,7 @@ type BackupStatus struct {
 // +kubebuilder:printcolumn:name="Last Job",type=string,JSONPath=".status.lastJob.outcome"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 
-// Backup describes a scheduled logical backup pipeline (dump → gzip → gpg → optional S3).
+// Backup describes a scheduled backup pipeline (database dump or PVC tar → gzip → gpg → optional S3).
 type Backup struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

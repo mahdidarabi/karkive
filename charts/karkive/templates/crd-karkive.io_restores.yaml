@@ -77,12 +77,15 @@ spec:
                 description: Database is the restore target (sandbox cluster).
                 properties:
                   host:
-                    description: Host is the DNS name or IP of the database (required).
+                    description: |-
+                      Host is the DNS name or IP of the database. Required for postgres,
+                      mariadb, and redis (checked by the webhook and controller).
                     minLength: 1
                     type: string
                   name:
-                    description: Name is the database name (postgres/mariadb) or a
-                      logical label (redis).
+                    description: |-
+                      Name is the database name (postgres/mariadb) or a logical label (redis).
+                      Required for postgres, mariadb, and redis.
                     minLength: 1
                     type: string
                   ownerRole:
@@ -96,9 +99,6 @@ spec:
                     maximum: 65535
                     minimum: 1
                     type: integer
-                required:
-                - host
-                - name
                 type: object
               dropDatabaseIfExists:
                 description: DropDatabaseIfExists drops a non-empty target before
@@ -111,6 +111,7 @@ spec:
                 - postgres
                 - mariadb
                 - redis
+                - pvc
                 type: string
               images:
                 description: Images overrides operator-wide default images.
@@ -169,6 +170,17 @@ spec:
                     type: object
                   redis:
                     description: Redis is used for redis-cli dump and restore.
+                    properties:
+                      image:
+                        description: Image is registry/repository:tag.
+                        type: string
+                      pullPolicy:
+                        description: PullPolicy for the container. Default IfNotPresent.
+                        type: string
+                    type: object
+                  tar:
+                    description: Tar must provide GNU tar; used by the pvcdump stage
+                      (engine pvc).
                     properties:
                       image:
                         description: Image is registry/repository:tag.

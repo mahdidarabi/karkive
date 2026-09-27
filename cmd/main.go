@@ -53,6 +53,7 @@ func main() {
 	flag.StringVar(&cfg.McImage, "mc-image", config.DefaultMcImage, "Default minio/mc image for s3-sync.")
 	flag.StringVar(&cfg.MariaDBImage, "mariadb-image", config.DefaultMariaDBImage, "Default MariaDB image for mysqldump / mysql restore.")
 	flag.StringVar(&cfg.RedisImage, "redis-image", config.DefaultRedisImage, "Default Redis image for redis-cli dump / restore.")
+	flag.StringVar(&cfg.TarImage, "tar-image", config.DefaultTarImage, "Default GNU tar image for PVC archives (engine pvc).")
 	flag.StringVar(&cfg.DefaultS3Endpoint, "default-s3-endpoint", "", "Fallback S3 endpoint when Backup.spec.s3.endpoint is empty.")
 	flag.StringVar(&cfg.DefaultS3Bucket, "default-s3-bucket", "", "Fallback S3 bucket when Backup.spec.s3.bucket is empty.")
 

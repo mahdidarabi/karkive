@@ -13,6 +13,7 @@ DUMP_PREFIX="${DUMP_PREFIX:-pg_dump}"
 case "${DUMP_PREFIX}" in
   mysqldump) PLAIN_GLOB='mysqldump-*.sql' ;;
   redisdump) PLAIN_GLOB='redisdump-*.rdb' ;;
+  pvcdump)   PLAIN_GLOB='pvcdump-*.tar' ;;
   *)         PLAIN_GLOB='pg_dump-*.pgdump' ;;
 esac
 ls "${DATA_DIR}"/${PLAIN_GLOB} >/dev/null 2>&1 || {

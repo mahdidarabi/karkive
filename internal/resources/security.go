@@ -49,6 +49,42 @@ func ToolsSecurityContext() *corev1.SecurityContext {
 	return unixUserSecurityContext(ToolsUID)
 }
 
+// PVCDumpSecurityContext is for the tar stage of engine pvc. Default: root
+// with only CAP_DAC_OVERRIDE, so tar reads files of any owner/mode from the
+// read-only source mount (DAC_OVERRIDE, unlike DAC_READ_SEARCH, is allowed by
+// Pod Security "baseline"). A non-zero spec.pvc.runAsUser runs as that UID
+// with no capabilities instead ("restricted"-compatible).
+func PVCDumpSecurityContext(src *karkivev1alpha1.PVCSourceSpec) *corev1.SecurityContext {
+	var uid int64
+	if src != nil && src.RunAsUser != nil {
+		uid = *src.RunAsUser
+	}
+	gid := uid
+	if src != nil && src.RunAsGroup != nil {
+		gid = *src.RunAsGroup
+	}
+	if uid != 0 {
+		sc := unixUserSecurityContext(uid)
+		sc.RunAsGroup = ptr.To(gid)
+		return sc
+	}
+	return &corev1.SecurityContext{
+		AllowPrivilegeEscalation: ptr.To(false),
+		Capabilities: &corev1.Capabilities{
+			Drop: []corev1.Capability{"ALL"},
+			Add:  []corev1.Capability{"DAC_OVERRIDE"},
+		},
+		Privileged:             ptr.To(false),
+		ReadOnlyRootFilesystem: ptr.To(true),
+		RunAsGroup:             ptr.To(gid),
+		RunAsNonRoot:           ptr.To(false),
+		RunAsUser:              ptr.To(int64(0)),
+		SeccompProfile: &corev1.SeccompProfile{
+			Type: corev1.SeccompProfileTypeRuntimeDefault,
+		},
+	}
+}
+
 func unixUserSecurityContext(uid int64) *corev1.SecurityContext {
 	return &corev1.SecurityContext{
 		AllowPrivilegeEscalation: ptr.To(false),

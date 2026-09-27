@@ -3,6 +3,7 @@ package resources
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -41,6 +42,12 @@ func MutateBackupConfigMap(cm *corev1.ConfigMap, backup *karkivev1alpha1.Backup,
 		cm.Data["REDIS_HOST"] = backup.Spec.Database.Host
 		cm.Data["REDIS_PORT"] = strconv.Itoa(int(port))
 		cm.Data["REDIS_NAME"] = backup.Spec.Database.Name
+	case karkivev1alpha1.EnginePVC:
+		src := pvcSource(backup)
+		cm.Data["PVC_CLAIM_NAME"] = src.ClaimName
+		cm.Data["PVC_SOURCE_DIR"] = config.DefaultPVCSourceDir
+		cm.Data["PVC_PATH"] = pvcSourcePath(src)
+		cm.Data["PVC_EXCLUDES"] = strings.Join(src.Excludes, "\n")
 	default:
 		cm.Data["PGHOST"] = backup.Spec.Database.Host
 		cm.Data["PGPORT"] = strconv.Itoa(int(port))

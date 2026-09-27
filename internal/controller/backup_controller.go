@@ -25,13 +25,18 @@ import (
 
 const (
 	secretRequeue = 30 * time.Second
+	sourceRequeue = 30 * time.Second
 	holderRequeue = 10 * time.Second
 )
 
 var requiredBackupSecretKeys = []string{
+	"gpg_passphrase",
+}
+
+// requiredBackupDBSecretKeys are skipped for engine pvc (no database login).
+var requiredBackupDBSecretKeys = []string{
 	"username",
 	"password",
-	"gpg_passphrase",
 }
 
 var requiredBackupS3SecretKeys = []string{
@@ -94,6 +99,19 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	owned := resources.BackupOwnedName(backup)
+	if resources.IsPVCBackup(backup) {
+		if err := r.checkSourcePVC(ctx, backup, owned); err != nil {
+			if apierrors.IsNotFound(err) {
+				msg := fmt.Sprintf("source PVC %q not found", backup.Spec.PVC.ClaimName)
+				if statusErr := r.setStatus(ctx, backup, karkivev1alpha1.BackupPhasePending, metav1.ConditionFalse, "SourcePVCNotFound", msg, corev1.EventTypeWarning, nil, ""); statusErr != nil {
+					return ctrl.Result{}, statusErr
+				}
+				return ctrl.Result{RequeueAfter: sourceRequeue}, nil
+			}
+			return ctrl.Result{}, r.setStatus(ctx, backup, karkivev1alpha1.BackupPhaseError, metav1.ConditionFalse, "SourcePVCInvalid", err.Error(), corev1.EventTypeWarning, nil, "")
+		}
+	}
+
 	holderName := resources.VolumeHolderName(owned)
 	needHolder := resources.NeedsVolumeHolder(backup.Spec.Runtime)
 	cron, err := ensureOwned(ctx, r.Client, r.Scheme, ownedResources{
@@ -117,6 +135,7 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 				ClaimName: owned,
 				MountPath: resources.BackupVolumeMountPath(backup),
 				Images:    backup.Spec.Images,
+				Affinity:  resources.RequiredPodAffinity(resources.PVCConsumerAffinityTerms(backup)...),
 			}, r.Config)
 		},
 	})
@@ -160,7 +179,11 @@ func (r *BackupReconciler) ensureSecret(ctx context.Context, backup *karkivev1al
 	if err := r.Get(ctx, key, secret); err != nil {
 		return err
 	}
-	for _, k := range requiredBackupSecretKeys {
+	required := requiredBackupSecretKeys
+	if !resources.IsPVCBackup(backup) {
+		required = append(append([]string{}, requiredBackupDBSecretKeys...), required...)
+	}
+	for _, k := range required {
 		if _, ok := secret.Data[k]; !ok {
 			return fmt.Errorf("secret %q is missing key %q", secret.Name, k)
 		}
@@ -170,6 +193,25 @@ func (r *BackupReconciler) ensureSecret(ctx context.Context, backup *karkivev1al
 			if _, ok := secret.Data[k]; !ok {
 				return fmt.Errorf("secret %q is missing key %q", secret.Name, k)
 			}
+		}
+	}
+	return nil
+}
+
+// checkSourcePVC verifies the engine pvc claim exists and can be mounted
+// next to its consumer. NotFound is returned unwrapped so the caller requeues.
+func (r *BackupReconciler) checkSourcePVC(ctx context.Context, backup *karkivev1alpha1.Backup, owned string) error {
+	claim := backup.Spec.PVC.ClaimName
+	if claim == owned {
+		return fmt.Errorf("spec.pvc.claimName %q is this Backup's own scratch PVC", claim)
+	}
+	pvc := &corev1.PersistentVolumeClaim{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: backup.Namespace, Name: claim}, pvc); err != nil {
+		return err
+	}
+	for _, mode := range pvc.Spec.AccessModes {
+		if mode == corev1.ReadWriteOncePod {
+			return fmt.Errorf("source PVC %q is ReadWriteOncePod; a backup pod cannot mount it next to its consumer", claim)
 		}
 	}
 	return nil

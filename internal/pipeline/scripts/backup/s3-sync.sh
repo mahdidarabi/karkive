@@ -23,6 +23,7 @@ DUMP_PREFIX="${DUMP_PREFIX:-pg_dump}"
 case "${DUMP_PREFIX}" in
   mysqldump) S3_NAME='mysqldump-*.sql.gz.gpg' ;;
   redisdump) S3_NAME='redisdump-*.rdb.gz.gpg' ;;
+  pvcdump)   S3_NAME='pvcdump-*.tar.gz.gpg' ;;
   *)         S3_NAME='pg_dump-*.pgdump.gz.gpg' ;;
 esac
 log "mirror finished; pruning S3 objects older than ${S3_OLDER_THAN} name=${S3_NAME} (days=${S3_RETENTION_DAYS:-n/a} hours=${S3_RETENTION_HOURS:-n/a})"

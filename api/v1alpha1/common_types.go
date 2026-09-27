@@ -7,20 +7,23 @@ import (
 )
 
 // Engine identifies the datastore being backed up or restored.
-// +kubebuilder:validation:Enum=postgres;mariadb;redis
+// pvc archives a PersistentVolumeClaim's files with tar (Backup only).
+// +kubebuilder:validation:Enum=postgres;mariadb;redis;pvc
 type Engine string
 
 const (
 	EnginePostgres Engine = "postgres"
 	EngineMariaDB  Engine = "mariadb"
 	EngineRedis    Engine = "redis"
+	EnginePVC      Engine = "pvc"
 )
 
 // DatabaseSpec is the connection target for dump or restore.
 type DatabaseSpec struct {
-	// Host is the DNS name or IP of the database (required).
+	// Host is the DNS name or IP of the database. Required for postgres,
+	// mariadb, and redis (checked by the webhook and controller).
 	// +kubebuilder:validation:MinLength=1
-	Host string `json:"host"`
+	Host string `json:"host,omitempty"`
 
 	// Port of the database. Defaults: postgres 5432, mariadb 3306, redis 6379.
 	// +kubebuilder:validation:Minimum=1
@@ -28,8 +31,9 @@ type DatabaseSpec struct {
 	Port int32 `json:"port,omitempty"`
 
 	// Name is the database name (postgres/mariadb) or a logical label (redis).
+	// Required for postgres, mariadb, and redis.
 	// +kubebuilder:validation:MinLength=1
-	Name string `json:"name"`
+	Name string `json:"name,omitempty"`
 
 	// OwnerRole is created/used on postgres restore (defaults to Name).
 	OwnerRole string `json:"ownerRole,omitempty"`
@@ -111,6 +115,8 @@ type ImageSet struct {
 	MariaDB *ImageSpec `json:"mariadb,omitempty"`
 	// Redis is used for redis-cli dump and restore.
 	Redis *ImageSpec `json:"redis,omitempty"`
+	// Tar must provide GNU tar; used by the pvcdump stage (engine pvc).
+	Tar *ImageSpec `json:"tar,omitempty"`
 }
 
 // SecretKeySelector points at a Secret and optional key names.

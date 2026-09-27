@@ -13,6 +13,7 @@ DUMP_PREFIX="${DUMP_PREFIX:-pg_dump}"
 case "${DUMP_PREFIX}" in
   mysqldump) GZ_GLOB='mysqldump-*.sql.gz' ;;
   redisdump) GZ_GLOB='redisdump-*.rdb.gz' ;;
+  pvcdump)   GZ_GLOB='pvcdump-*.tar.gz' ;;
   *)         GZ_GLOB='pg_dump-*.pgdump.gz' ;;
 esac
 ls "${DATA_DIR}"/${GZ_GLOB} >/dev/null 2>&1 || {

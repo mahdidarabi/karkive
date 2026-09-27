@@ -42,6 +42,7 @@ spec:
             - --mc-image={{ .Values.defaults.mcImage }}
             - --mariadb-image={{ .Values.defaults.mariadbImage }}
             - --redis-image={{ .Values.defaults.redisImage }}
+            - --tar-image={{ .Values.defaults.tarImage }}
             {{- if .Values.defaults.s3.endpoint }}
             - --default-s3-endpoint={{ .Values.defaults.s3.endpoint }}
             {{- end }}

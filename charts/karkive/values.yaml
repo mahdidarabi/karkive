@@ -48,6 +48,8 @@ defaults:
   mcImage: docker.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
   mariadbImage: docker.io/library/mariadb:10.6
   redisImage: docker.io/library/redis:7.4
+  # GNU tar for engine pvc (pvcdump)
+  tarImage: docker.io/library/debian:trixie-slim
   s3:
     endpoint: ""
     bucket: ""

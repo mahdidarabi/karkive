@@ -56,21 +56,22 @@ func WithRuntimeRole(labels map[string]string, role string) map[string]string {
 	return out
 }
 
-// VolumeHolderAffinity forces Job pods onto the node's holder (RWO attach is per node).
-func VolumeHolderAffinity(matchLabels map[string]string) *corev1.Affinity {
-	return &corev1.Affinity{
-		PodAffinity: &corev1.PodAffinity{
-			RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
-				LabelSelector: &metav1.LabelSelector{MatchLabels: matchLabels},
-				TopologyKey:   kubernetesHostnameLabel,
-			}},
-		},
+// VolumeHolderAffinityTerm forces Job pods onto the node's holder (RWO attach is per node).
+func VolumeHolderAffinityTerm(matchLabels map[string]string) corev1.PodAffinityTerm {
+	return corev1.PodAffinityTerm{
+		LabelSelector: &metav1.LabelSelector{MatchLabels: matchLabels},
+		TopologyKey:   kubernetesHostnameLabel,
 	}
 }
 
-func applyVolumeHolderAffinity(pod *corev1.PodSpec, matchLabels map[string]string) {
-	if matchLabels == nil {
-		return
+// RequiredPodAffinity ANDs the terms. Nil when there are none.
+func RequiredPodAffinity(terms ...corev1.PodAffinityTerm) *corev1.Affinity {
+	if len(terms) == 0 {
+		return nil
 	}
-	pod.Affinity = VolumeHolderAffinity(matchLabels)
+	return &corev1.Affinity{
+		PodAffinity: &corev1.PodAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: terms,
+		},
+	}
 }

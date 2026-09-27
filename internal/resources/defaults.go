@@ -218,6 +218,12 @@ func redisImage(images *karkivev1alpha1.ImageSet, cfg config.Config) (string, co
 	}, cfg.RedisImage, config.DefaultRedisImage)
 }
 
+func tarImage(images *karkivev1alpha1.ImageSet, cfg config.Config) (string, corev1.PullPolicy) {
+	return pipelineImage(images, func(i *karkivev1alpha1.ImageSet) *karkivev1alpha1.ImageSpec {
+		return i.Tar
+	}, cfg.TarImage, config.DefaultTarImage)
+}
+
 func pipelineImage(images *karkivev1alpha1.ImageSet, pick func(*karkivev1alpha1.ImageSet) *karkivev1alpha1.ImageSpec, configured, fallback string) (string, corev1.PullPolicy) {
 	var override *karkivev1alpha1.ImageSpec
 	if images != nil {

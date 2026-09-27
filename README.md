@@ -2,7 +2,7 @@
 
 [![Website](https://img.shields.io/badge/website-karkive.ir-c4a35a)](https://karkive.ir)
 [![CI](https://github.com/mahdidarabi/karkive/actions/workflows/ci.yaml/badge.svg)](https://github.com/mahdidarabi/karkive/actions/workflows/ci.yaml)
-[![Helm](https://img.shields.io/badge/Helm-0.0.11--p.2-0F1689?logo=helm)](https://github.com/mahdidarabi/karkive/pkgs/container/charts%2Fkarkive)
+[![Helm](https://img.shields.io/badge/Helm-0.0.12-0F1689?logo=helm)](https://github.com/mahdidarabi/karkive/pkgs/container/charts%2Fkarkive)
 [![Image](https://img.shields.io/badge/GHCR-karkive-blue?logo=github)](https://github.com/mahdidarabi/karkive/pkgs/container/karkive)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go)](https://go.dev/)
 [![Kubebuilder](https://img.shields.io/badge/API-karkive.io%2Fv1alpha1-326CE5?logo=kubernetes)](https://github.com/mahdidarabi/karkive/tree/main/api/v1alpha1)
@@ -11,7 +11,7 @@ Site: **[karkive.ir](https://karkive.ir)**
 
 Kubernetes operator for **scheduled logical backups and restores**. You declare a `Backup` or `Restore` CR; KArkive owns a ConfigMap, optional PVC, and CronJob that dump, gzip, GPG-encrypt, and optionally sync to S3 (and the reverse).
 
-**Engines:** PostgreSQL · MariaDB · Redis
+**Engines:** PostgreSQL · MariaDB · Redis · PVC files (`tar`, backup only)
 
 The operator never creates Secrets. It only reads `spec.secretRef` (and the engine-specific restore secret) from the same namespace as the CR.
 
@@ -57,6 +57,7 @@ flowchart LR
   CJ --> P[Pipeline Job]
   P --> S3[(S3)]
   P --> DB[(Postgres / MariaDB / Redis)]
+  P -. read-only .-> SRC[(Source PVC)]
 ```
 
 ### Backup pipeline
@@ -72,8 +73,9 @@ flowchart LR
 | `postgres` | `pg_dump` | `pgrestore` |
 | `mariadb` | `mysqldump` | `mysqlrestore` |
 | `redis` | `redis-cli --rdb` | ephemeral `redis-server` + `REPLICAOF` |
+| `pvc` | GNU `tar` of a read-only PVC (`pvcdump`) | not implemented; [restore manually](#pvc-backup) |
 
-Shared stages use BusyBox (`find` / `gzip`), `vladgh/gpg`, and MinIO `mc`. Engine images default to CloudNativePG PostgreSQL 18.4, MariaDB 10.6, and Redis 7.4.
+Shared stages use BusyBox (`find` / `gzip`), `vladgh/gpg`, and MinIO `mc`. Engine images default to CloudNativePG PostgreSQL 18.4, MariaDB 10.6, Redis 7.4, and Debian trixie-slim (GNU tar).
 
 ### Runtime
 
@@ -102,13 +104,13 @@ Redis restore starts an ephemeral `redis-server` in the Job and has the target `
 
 Images are published to `ghcr.io/mahdidarabi/karkive` from GitHub Actions on `main` (`latest`, `main`, `sha-<git-sha>`) and on tags `v*` (semver). Helm charts are pushed to GHCR on tags `v*`. `Chart.yaml` `version` and `appVersion` must match the tag without the `v` prefix.
 
-Current release: **`0.0.11-p.3`**
+Current release: **`0.0.12`**
 
 ```bash
-helm show chart oci://ghcr.io/mahdidarabi/charts/karkive --version 0.0.11-p.3
+helm show chart oci://ghcr.io/mahdidarabi/charts/karkive --version 0.0.12
 
 helm install karkive oci://ghcr.io/mahdidarabi/charts/karkive \
-  --version 0.0.11-p.3 \
+  --version 0.0.12 \
   -n karkive-system --create-namespace
 ```
 
@@ -116,7 +118,7 @@ With Prometheus Operator scrape, alerts, and a Grafana dashboard ConfigMap:
 
 ```bash
 helm install karkive oci://ghcr.io/mahdidarabi/charts/karkive \
-  --version 0.0.11-p.3 \
+  --version 0.0.12 \
   -n karkive-system --create-namespace \
   --set metrics.serviceMonitor.enabled=true \
   --set metrics.prometheusRule.enabled=true \
@@ -127,7 +129,7 @@ On GitOps (Argo CD), prefer cert-manager for webhook serving certs so Helm does 
 
 ```bash
 helm install karkive oci://ghcr.io/mahdidarabi/charts/karkive \
-  --version 0.0.11-p.3 \
+  --version 0.0.12 \
   -n karkive-system --create-namespace \
   --set webhook.certManager.enabled=true
 ```
@@ -179,7 +181,7 @@ spec:
   logFileEnabled: false      # true → also write logs/<pod>.log on the volume
 ```
 
-MariaDB and Redis samples live under [`examples/`](examples/) (`backup-mariadb.yaml`, `backup-redis.yaml`).
+MariaDB, Redis, and PVC samples live under [`examples/`](examples/) (`backup-mariadb.yaml`, `backup-redis.yaml`, `backup-pvc.yaml`).
 
 Useful knobs:
 
@@ -194,13 +196,64 @@ Useful knobs:
 | `spec.job.ttlSecondsAfterFinished` | `86400` | Cleanup finished Jobs |
 | `spec.runtime.mode` | `CronJob` | `CronJob` (default) or `CronJobWithVolumeHolder`. `PersistentPodWithTriggerJob` and `PersistentPodWithInPodCron` are reserved and rejected until implemented |
 | `spec.images` | operator defaults | Shared `ImageSet`: busybox / gpg / postgres / mariadb / redis / mc |
-| `spec.resources` | — | Per-stage CPU/memory (`cleanup`, `dump`, `compress`, `encrypt`, `s3Sync`) |
+| `spec.resources` | — | Per-stage CPU/memory (`cleanup`, `dump`, `compress`, `encrypt`, `s3Sync`); `dump` is `pvcdump` for engine `pvc` |
 | `spec.component` | CR name | `app.kubernetes.io/component` label |
 
 Trigger a run without waiting for cron:
 
 ```bash
 kubectl create job --from=cronjob/karkive-backup-app-postgres app-postgres-manual -n backup
+```
+
+### PVC backup
+
+`engine: pvc` archives the files of an existing PersistentVolumeClaim instead of dumping a database: `cleanup` → `pvcdump` → `compress` → `encrypt` → `s3-sync`. Objects are named `pvcdump-<claim>-<yyyy-mm-dd-HH-MM>.tar.gz.gpg`. `spec.database` is not used.
+
+```yaml
+apiVersion: karkive.io/v1alpha1
+kind: Backup
+metadata:
+  name: nextcloud-data
+  namespace: nextcloud      # must be the claim's namespace
+spec:
+  engine: pvc
+  schedule: "0 3 * * *"
+  pvc:
+    claimName: nextcloud-data
+    path: data              # optional subdirectory; default the whole claim
+    excludes: ["*.part", "./appdata_*/preview"]
+    consumerSelector:       # RWO claim in use: schedule on the app's node
+      matchLabels:
+        app.kubernetes.io/name: nextcloud
+  s3:
+    path: nextcloud/pvcdump
+  secretRef:
+    name: backup-nextcloud-data   # gpg_passphrase (+ S3 keys); no username/password
+  persistence:
+    size: 50Gi
+```
+
+| Field | Default | Purpose |
+| --- | --- | --- |
+| `spec.pvc.claimName` | required | Source claim in the Backup's namespace. Mounted **read-only**, only into `pvcdump`. `ReadWriteOncePod` claims are rejected |
+| `spec.pvc.path` | claim root | Relative subdirectory to archive (no leading `/`, no `..`) |
+| `spec.pvc.excludes` | — | GNU tar `--exclude` patterns. `cache` matches at any depth; `./cache` only at the top |
+| `spec.pvc.consumerSelector` | — | Labels of the pods that mount the claim. Adds required podAffinity (`kubernetes.io/hostname`) to Job pods and the volume holder |
+| `spec.pvc.runAsUser` / `runAsGroup` | root | Unset: root with only `CAP_DAC_OVERRIDE` (reads any file). Set a non-root UID where Pod Security `restricted` applies; tar then reads only what that UID can |
+| `spec.images.tar` | `--tar-image` | Image with GNU tar |
+
+Things to know:
+
+- **Namespace.** Pods can only mount claims in their own namespace, so the Backup (and its Secret) lives next to the claim, not in a central `backup` namespace.
+- **RWO claims.** A `ReadWriteOnce` claim attaches to one node. If the app is running, set `consumerSelector` or the Job pod may land elsewhere and hang on `Multi-Attach`. While it is set, Jobs stay `Pending` when no matching pod runs. RWX claims need no selector.
+- **Consistency.** tar reads a live filesystem. Files that change mid-read produce a warning (tar exit 1) and the archive is kept; it is not point-in-time. Quiesce the app, or back up databases with their own engine.
+- **Scratch size.** The scratch volume holds the uncompressed `.tar`, then the `.tar.gz`, plus `retained/` copies for `localRetentionDays`. Size `spec.persistence` for that, or use `persistence.enabled: false` (emptyDir) when S3 is on.
+- **Pod Security.** The default `pvcdump` container runs as root with `CAP_DAC_OVERRIDE` (allowed by `baseline`, not `restricted`). The source mount is read-only and the volume is not chowned (`readOnly` also skips `fsGroup`).
+- **Restore** is not automated (`Restore` rejects `engine: pvc`). Download the object, then with the app stopped:
+
+```bash
+gpg --batch --passphrase-file gpg_passphrase --decrypt pvcdump-nextcloud-data-2026-09-27-03-00.tar.gz.gpg \
+  | tar -xz --numeric-owner -C /path/to/mounted/claim
 ```
 
 ## Restore
@@ -259,11 +312,11 @@ The operator does not create or mutate Secrets. Apply them yourself in the CR na
 
 | Key | Used for |
 | --- | --- |
-| `username` | DB user (Redis ACL user; `default` if unused) |
-| `password` | DB password |
+| `username` | DB user (Redis ACL user; `default` if unused). Not used for engine `pvc` |
+| `password` | DB password. Not used for engine `pvc` |
 | `s3_access_key` | S3 (omit when `spec.s3.enabled` is false) |
 | `s3_secret_key` | S3 (omit when `spec.s3.enabled` is false) |
-| `gpg_passphrase` | Symmetric encryption of the dump |
+| `gpg_passphrase` | Symmetric encryption of the dump or archive |
 
 **Restore** splits credentials:
 
@@ -365,6 +418,7 @@ Operator-wide defaults (Helm `values.yaml` → flags):
 | `defaults.postgresImage` | `--postgres-image` | `cloudnative-pg/postgresql:18.4` |
 | `defaults.mariadbImage` | `--mariadb-image` | `mariadb:10.6` |
 | `defaults.redisImage` | `--redis-image` | `redis:7.4` |
+| `defaults.tarImage` | `--tar-image` | `debian:trixie-slim` (GNU tar, engine `pvc`) |
 | `defaults.mcImage` | `--mc-image` | `minio/mc:RELEASE.2025-08-13T08-35-41Z` |
 | `defaults.s3.endpoint` | `--default-s3-endpoint` | empty (required on the CR when S3 is enabled, unless set) |
 | `defaults.s3.bucket` | `--default-s3-bucket` | empty |
@@ -410,5 +464,5 @@ charts/karkive/          Helm chart (CRDs, RBAC, webhook, metrics)
 docs/                    Landing page (GitHub Pages → karkive.ir)
 config/crd/bases/        Generated CRDs
 config/samples/          Example Backup / Restore / Secret
-examples/                Postgres, MariaDB, Redis CRs
+examples/                Postgres, MariaDB, Redis, PVC CRs
 ```

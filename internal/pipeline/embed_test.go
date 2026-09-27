@@ -21,7 +21,7 @@ func TestCommonScriptEmbedded(t *testing.T) {
 }
 
 func TestBackupScriptsEmbedded(t *testing.T) {
-	for _, name := range []string{"cleanup.sh", "pgdump.sh", "mysqldump.sh", "redisdump.sh", "compress.sh", "encrypt.sh", "s3-sync.sh"} {
+	for _, name := range []string{"cleanup.sh", "pgdump.sh", "mysqldump.sh", "redisdump.sh", "pvcdump.sh", "compress.sh", "encrypt.sh", "s3-sync.sh"} {
 		s, err := BackupScript(name)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
@@ -156,5 +156,43 @@ func TestPgDumpDisablesStatementTimeout(t *testing.T) {
 	}
 	if !strings.Contains(s, "dump_heartbeat_start") {
 		t.Fatal("pgdump.sh should heartbeat while pg_dump runs")
+	}
+}
+
+func TestPVCDumpScript(t *testing.T) {
+	s, err := BackupScript("pvcdump.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"STAGE=pvcdump",
+		"PVC_CLAIM_NAME",
+		"--numeric-owner",
+		"--exclude-from=",
+		`[ "$ec" -eq 1 ]`,
+		"pvcdump-${CLAIM}-",
+		".step-dump-done",
+		"dump_heartbeat_start",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("pvcdump.sh missing %q", want)
+		}
+	}
+}
+
+func TestBackupStagesKnowPVCDumpPrefix(t *testing.T) {
+	for name, glob := range map[string]string{
+		"cleanup.sh":  "pvcdump-*.tar.gz.gpg",
+		"compress.sh": "pvcdump-*.tar'",
+		"encrypt.sh":  "pvcdump-*.tar.gz'",
+		"s3-sync.sh":  "pvcdump-*.tar.gz.gpg",
+	} {
+		s, err := BackupScript(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(s, glob) {
+			t.Errorf("%s missing pvcdump glob %q", name, glob)
+		}
 	}
 }

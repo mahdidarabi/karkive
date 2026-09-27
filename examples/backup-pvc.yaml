@@ -1,0 +1,32 @@
+# Archive the files of an existing PVC (tar → gzip → gpg → S3).
+# The Backup must live in the claim's namespace; the claim is mounted read-only.
+apiVersion: karkive.io/v1alpha1
+kind: Backup
+metadata:
+  name: nextcloud-data
+  namespace: nextcloud
+spec:
+  engine: pvc
+  schedule: "0 3 * * *"
+  pvc:
+    claimName: nextcloud-data
+    path: data                  # optional: archive only this subdirectory
+    excludes:                   # GNU tar --exclude patterns
+      - "./appdata_*/preview"
+      - "*.part"
+    # RWO claim in use by the app: run backup pods on the app's node.
+    consumerSelector:
+      matchLabels:
+        app.kubernetes.io/name: nextcloud
+    # runAsUser: 33             # non-root tar (Pod Security "restricted"); default root + DAC_OVERRIDE
+  s3:
+    endpoint: https://s3.example.com
+    bucket: backups
+    path: nextcloud/pvcdump
+    retentionDays: 14
+  secretRef:
+    name: backup-nextcloud-data # gpg_passphrase, s3_access_key, s3_secret_key
+  persistence:
+    enabled: true
+    size: 50Gi                  # scratch: uncompressed tar + .tar.gz + retained/ copies
+  localRetentionDays: 2

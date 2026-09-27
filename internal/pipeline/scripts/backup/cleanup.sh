@@ -21,6 +21,7 @@ DUMP_PREFIX="${DUMP_PREFIX:-pg_dump}"
 case "${DUMP_PREFIX}" in
   mysqldump) RETAINED_GLOB='mysqldump-*.sql.gz.gpg' ;;
   redisdump) RETAINED_GLOB='redisdump-*.rdb.gz.gpg' ;;
+  pvcdump)   RETAINED_GLOB='pvcdump-*.tar.gz.gpg' ;;
   *)         RETAINED_GLOB='pg_dump-*.pgdump.gz.gpg' ;;
 esac
 find "${RETAINED_DIR}" -type f -name "${RETAINED_GLOB}" -mtime "+${LOCAL_KEEP}" -print \
@@ -31,7 +32,7 @@ find "${RETAINED_DIR}" -type f -name "${RETAINED_GLOB}" -mtime "+${LOCAL_KEEP}" 
 # Legacy / stray encrypted dumps outside retained/
 # -delete implies -depth, which disables -prune; delete via rm instead.
 find "${DATA_ROOT}" \( -path "${RETAINED_DIR}" -o -path "${DATA_DIR}" \) -prune -o \
-  -type f \( -name 'pg_dump-*.pgdump.gz.gpg' -o -name 'mysqldump-*.sql.gz.gpg' -o -name 'redisdump-*.rdb.gz.gpg' \) \
+  -type f \( -name 'pg_dump-*.pgdump.gz.gpg' -o -name 'mysqldump-*.sql.gz.gpg' -o -name 'redisdump-*.rdb.gz.gpg' -o -name 'pvcdump-*.tar.gz.gpg' \) \
   -mtime "+${LOCAL_KEEP}" -print \
   | while IFS= read -r f; do
       log "deleted expired local ${f}"

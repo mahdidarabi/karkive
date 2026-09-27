@@ -8,6 +8,7 @@ type Config struct {
 	McImage       string
 	MariaDBImage  string
 	RedisImage    string
+	TarImage      string
 
 	DefaultS3Endpoint string
 	DefaultS3Bucket   string
@@ -20,10 +21,14 @@ const (
 	DefaultMcImage       = "docker.io/minio/mc:RELEASE.2025-08-13T08-35-41Z"
 	DefaultMariaDBImage  = "docker.io/library/mariadb:10.6"
 	DefaultRedisImage    = "docker.io/library/redis:7.4"
+	// GNU tar (pvcdump). BusyBox tar lacks --numeric-owner and large-file support.
+	DefaultTarImage = "docker.io/library/debian:trixie-slim"
 
 	DefaultDataDir     = "/backup/data"
 	DefaultMcConfigDir = "/tmp/mc-config"
 	DefaultWorkdir     = "/workdir"
+	// DefaultPVCSourceDir is where engine pvc mounts the source claim (read-only).
+	DefaultPVCSourceDir = "/source"
 
 	DefaultLocalRetentionDays int32 = 7
 	DefaultS3RetentionDays    int32 = 14
