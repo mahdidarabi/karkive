@@ -6,7 +6,7 @@
     <title>KArkive — Kubernetes operator for logical backups</title>
     <meta
       name="description"
-      content="KArkive is a Kubernetes operator for scheduled logical backups and restores. Declare a Backup or Restore CR; it dumps, gzip-compresses, GPG-encrypts, and syncs to S3. PostgreSQL, MariaDB, Redis."
+      content="KArkive is a Kubernetes operator for scheduled logical backups and restores. Declare a Backup or Restore CR; it dumps, gzip-compresses, GPG-encrypts, and syncs to S3. PostgreSQL, MariaDB, Redis, and PVC files."
     />
     <link rel="canonical" href="https://karkive.ir/" />
     <script>
@@ -28,7 +28,7 @@
     <meta property="og:title" content="KArkive — Kubernetes operator for logical backups" />
     <meta
       property="og:description"
-      content="Declare a Backup or Restore CR. KArkive dumps, gzip-compresses, GPG-encrypts, and syncs to S3. PostgreSQL, MariaDB, Redis."
+      content="Declare a Backup or Restore CR. KArkive dumps, gzip-compresses, GPG-encrypts, and syncs to S3. PostgreSQL, MariaDB, Redis, and PVC files."
     />
     <meta property="og:locale" content="en_US" />
     <meta name="twitter:card" content="summary" />
@@ -47,7 +47,7 @@
         "applicationCategory": "DeveloperApplication",
         "operatingSystem": "Kubernetes",
         "license": "https://github.com/mahdidarabi/karkive",
-        "description": "Kubernetes operator for scheduled logical backups and restores of PostgreSQL, MariaDB, and Redis.",
+        "description": "Kubernetes operator for scheduled logical backups and restores of PostgreSQL, MariaDB, and Redis, plus PersistentVolumeClaim file backups.",
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
       }
     </script>
@@ -85,8 +85,8 @@
         <h1>You declare a <em>Backup</em>.<br />KArkive runs the archive.</h1>
         <p class="lede">
           Scheduled logical backups and restores, in-cluster. A CR becomes a ConfigMap,
-          optional PVC, and CronJob that dump, gzip, GPG-encrypt, and sync to S3 — and
-          the reverse on restore.
+          optional PVC, and CronJob that dump (or tar a PVC), gzip, GPG-encrypt, and sync
+          to S3 — and the reverse on restore.
         </p>
         <div class="cta">
           <a class="btn btn-primary" href="#install">Install with Helm</a>
@@ -105,6 +105,7 @@
           <li>PostgreSQL</li>
           <li>MariaDB</li>
           <li>Redis</li>
+          <li>PVC files</li>
         </ul>
         <ul class="capability-strip" aria-label="KArkive capabilities">
           <li><strong>2</strong><span>CRDs</span></li>
@@ -155,7 +156,7 @@
               <li>encrypt</li>
               <li>s3-sync</li>
             </ol>
-            <p>Skip <code>s3-sync</code> when <code>spec.s3.enabled</code> is false; encrypted dumps stay on the PVC.</p>
+            <p>Skip <code>s3-sync</code> when <code>spec.s3.enabled</code> is false; encrypted dumps stay on the PVC. For <code>engine: pvc</code>, dump is <code>tar</code> of the source claim.</p>
           </article>
           <article>
             <h3>Restore</h3>
@@ -224,7 +225,7 @@
       <section class="engines" id="engines">
         <div class="section-head">
           <p class="eyebrow">Engines</p>
-          <h2>Three logical dumps. One CR shape.</h2>
+          <h2>Three logical dumps and a file archive. One CR shape.</h2>
         </div>
         <div class="engine-grid">
           <article>
@@ -238,6 +239,10 @@
           <article>
             <h3>Redis</h3>
             <p><code>redis-cli --rdb</code> on backup. Restore loads an ephemeral <code>redis-server</code> and <code>REPLICAOF</code> into the target.</p>
+          </article>
+          <article>
+            <h3>PVC files</h3>
+            <p>GNU <code>tar</code> of an existing claim, mounted read-only. <code>consumerSelector</code> lands the Job on the app's node for RWO claims. Backup only.</p>
           </article>
         </div>
       </section>

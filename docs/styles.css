@@ -654,6 +654,16 @@ pre .s {
   grid-template-columns: 1fr 1fr;
 }
 
+.engine-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 1100px) and (min-width: 901px) {
+  .engine-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .monitoring {
   max-width: calc(var(--max) + var(--gutter) * 2);
   margin: 0 auto;
@@ -1349,10 +1359,13 @@ body {
   -webkit-backdrop-filter: blur(18px) saturate(145%);
 }
 
+.flow-main li:hover,
 .stages article:hover,
 .engine-grid article:hover,
 .trait-list li:hover,
-.dash-stat:hover {
+.dash-stat:hover,
+.dash-card:hover,
+.dash-table:hover {
   border-color: rgba(255, 255, 255, 0.24);
   background:
     linear-gradient(145deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.035) 58%),
@@ -1435,17 +1448,23 @@ body {
 }
 
 @media (prefers-reduced-motion: no-preference) {
+  .flow-main li,
   .stages article,
   .engine-grid article,
   .trait-list li,
-  .dash-stat {
+  .dash-stat,
+  .dash-card,
+  .dash-table {
     transition: border-color 180ms ease, background 180ms ease, transform 180ms ease;
   }
 
+  .flow-main li:hover,
   .stages article:hover,
   .engine-grid article:hover,
   .trait-list li:hover,
-  .dash-stat:hover {
+  .dash-stat:hover,
+  .dash-card:hover,
+  .dash-table:hover {
     transform: translateY(-2px);
   }
 }
