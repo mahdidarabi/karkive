@@ -86,6 +86,8 @@ type PersistenceSpec struct {
 	AccessModes []corev1.PersistentVolumeAccessMode `json:"accessModes,omitempty"`
 
 	// Size of the PVC, or emptyDir.sizeLimit when Enabled=false. Default 1Gi.
+	// Raising it expands the existing PVC (the StorageClass must set
+	// allowVolumeExpansion); lowering it is ignored because PVCs cannot shrink.
 	Size resource.Quantity `json:"size,omitempty"`
 
 	// Annotations copied onto the PVC.

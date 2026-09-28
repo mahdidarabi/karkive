@@ -48,6 +48,11 @@ type RestoreReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 func (r *RestoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	res, err := r.reconcile(ctx, req)
+	return requeueOnConflict(ctx, res, err)
+}
+
+func (r *RestoreReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	restore := &karkivev1alpha1.Restore{}
@@ -149,6 +154,9 @@ func (r *RestoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 }
 
 func (r *RestoreReconciler) fail(ctx context.Context, restore *karkivev1alpha1.Restore, reason string, err error) error {
+	if apierrors.IsConflict(err) {
+		return err // retried by Reconcile; not a failure worth reporting
+	}
 	if statusErr := r.setStatus(ctx, restore, karkivev1alpha1.RestorePhaseError, metav1.ConditionFalse, reason, err.Error(), corev1.EventTypeWarning, nil, ""); statusErr != nil {
 		return statusErr
 	}

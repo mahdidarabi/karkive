@@ -27,6 +27,8 @@ const (
 	secretRequeue = 30 * time.Second
 	sourceRequeue = 30 * time.Second
 	holderRequeue = 10 * time.Second
+	// conflictRequeue retries after the informer cache catches up.
+	conflictRequeue = time.Second
 )
 
 var requiredBackupSecretKeys = []string{
@@ -64,6 +66,11 @@ type BackupReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	res, err := r.reconcile(ctx, req)
+	return requeueOnConflict(ctx, res, err)
+}
+
+func (r *BackupReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	backup := &karkivev1alpha1.Backup{}
@@ -167,6 +174,9 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 }
 
 func (r *BackupReconciler) fail(ctx context.Context, backup *karkivev1alpha1.Backup, reason string, err error) error {
+	if apierrors.IsConflict(err) {
+		return err // retried by Reconcile; not a failure worth reporting
+	}
 	if statusErr := r.setStatus(ctx, backup, karkivev1alpha1.BackupPhaseError, metav1.ConditionFalse, reason, err.Error(), corev1.EventTypeWarning, nil, ""); statusErr != nil {
 		return statusErr
 	}

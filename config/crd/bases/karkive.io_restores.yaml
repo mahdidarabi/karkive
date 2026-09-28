@@ -273,8 +273,10 @@ spec:
                     anyOf:
                     - type: integer
                     - type: string
-                    description: Size of the PVC, or emptyDir.sizeLimit when Enabled=false.
-                      Default 1Gi.
+                    description: |-
+                      Size of the PVC, or emptyDir.sizeLimit when Enabled=false. Default 1Gi.
+                      Raising it expands the existing PVC (the StorageClass must set
+                      allowVolumeExpansion); lowering it is ignored because PVCs cannot shrink.
                     pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                     x-kubernetes-int-or-string: true
                   storageClassName:

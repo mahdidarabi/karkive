@@ -2,19 +2,23 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	karkivev1alpha1 "github.com/mahdidarabi/KArkive/api/v1alpha1"
@@ -688,6 +692,96 @@ func TestBackupReconcile_SecretNotFoundEventsOnce(t *testing.T) {
 	}
 	if c.updates != 1 {
 		t.Fatalf("status updates after second reconcile=%d, want 1", c.updates)
+	}
+}
+
+func TestBackupReconcile_ExpandsExistingPVC(t *testing.T) {
+	for _, tc := range []struct {
+		name, size, want string
+	}{
+		{name: "grow", size: "50Gi", want: "50Gi"},
+		{name: "shrink ignored", size: "30Gi", want: "40Gi"},
+		{name: "unset keeps current", size: "", want: "40Gi"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			scheme := testScheme(t)
+			backup := testBackupCR()
+			if tc.size != "" {
+				backup.Spec.Persistence = &karkivev1alpha1.PersistenceSpec{Size: resource.MustParse(tc.size)}
+			}
+			owned := resources.BackupOwnedName(backup)
+			existing := &corev1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: owned, Namespace: backup.Namespace, CreationTimestamp: metav1.Now()},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("40Gi")},
+					},
+				},
+			}
+			c := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(backup, testBackupSecret(), existing).
+				WithStatusSubresource(&karkivev1alpha1.Backup{}).
+				Build()
+			r := &BackupReconciler{Client: c, Scheme: scheme, Recorder: record.NewFakeRecorder(16)}
+
+			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: backup.Name, Namespace: backup.Namespace}}
+			if _, err := r.Reconcile(context.Background(), req); err != nil {
+				t.Fatal(err)
+			}
+			pvc := &corev1.PersistentVolumeClaim{}
+			if err := c.Get(context.Background(), client.ObjectKey{Namespace: backup.Namespace, Name: owned}, pvc); err != nil {
+				t.Fatal(err)
+			}
+			got := pvc.Spec.Resources.Requests[corev1.ResourceStorage]
+			if got.Cmp(resource.MustParse(tc.want)) != 0 {
+				t.Errorf("storage request=%s, want %s", got.String(), tc.want)
+			}
+		})
+	}
+}
+
+// A stale cached CronJob makes the Update conflict (the CronJob controller
+// bumps its status on every schedule). That must requeue quietly, not set Error.
+func TestBackupReconcile_ConflictRequeuesWithoutError(t *testing.T) {
+	scheme := testScheme(t)
+	backup := testBackupCR()
+	stale := &batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Name: resources.BackupOwnedName(backup), Namespace: backup.Namespace}}
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(backup, testBackupSecret(), stale).
+		WithStatusSubresource(&karkivev1alpha1.Backup{}).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+				if _, ok := obj.(*batchv1.CronJob); ok {
+					return apierrors.NewConflict(batchv1.Resource("cronjobs"), obj.GetName(), errors.New("the object has been modified"))
+				}
+				return c.Update(ctx, obj, opts...)
+			},
+		}).
+		Build()
+	rec := record.NewFakeRecorder(16)
+	r := &BackupReconciler{Client: c, Scheme: scheme, Recorder: rec}
+
+	res, err := r.Reconcile(context.Background(), reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: backup.Name, Namespace: backup.Namespace},
+	})
+	if err != nil {
+		t.Fatalf("conflict surfaced as reconcile error: %v", err)
+	}
+	if res.RequeueAfter != conflictRequeue {
+		t.Errorf("requeueAfter=%v, want %v", res.RequeueAfter, conflictRequeue)
+	}
+	updated := &karkivev1alpha1.Backup{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(backup), updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status.Phase != "" {
+		t.Errorf("phase=%q, want status left untouched", updated.Status.Phase)
+	}
+	if events := drainEvents(rec); len(events) != 0 {
+		t.Errorf("unexpected events: %v", events)
 	}
 }
 

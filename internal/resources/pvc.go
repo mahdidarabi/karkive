@@ -32,3 +32,17 @@ func MutatePVC(pvc *corev1.PersistentVolumeClaim, persistence *karkivev1alpha1.P
 	}
 	pvc.Spec = spec
 }
+
+// ExpandPVC raises an existing PVC's storage request to persistence.size.
+// Kubernetes rejects shrinking a claim, so a smaller size is ignored. Growing
+// needs a StorageClass with allowVolumeExpansion; the API server rejects it otherwise.
+func ExpandPVC(pvc *corev1.PersistentVolumeClaim, persistence *karkivev1alpha1.PersistenceSpec) {
+	want := persistenceSize(persistence)
+	if cur, ok := pvc.Spec.Resources.Requests[corev1.ResourceStorage]; ok && want.Cmp(cur) <= 0 {
+		return
+	}
+	if pvc.Spec.Resources.Requests == nil {
+		pvc.Spec.Resources.Requests = corev1.ResourceList{}
+	}
+	pvc.Spec.Resources.Requests[corev1.ResourceStorage] = want
+}

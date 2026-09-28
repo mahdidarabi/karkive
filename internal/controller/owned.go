@@ -7,8 +7,10 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -46,6 +48,18 @@ func ownedReason(err error) string {
 	return "OwnedResourceError"
 }
 
+// requeueOnConflict turns an optimistic-lock conflict into a quiet retry. The
+// informer cache lags writes from other controllers (the CronJob controller
+// updates status on every schedule tick), so a stale resourceVersion is
+// expected and must not flip the CR to Error.
+func requeueOnConflict(ctx context.Context, res ctrl.Result, err error) (ctrl.Result, error) {
+	if apierrors.IsConflict(err) {
+		log.FromContext(ctx).V(1).Info("conflict on stale object; requeueing", "error", err.Error())
+		return ctrl.Result{RequeueAfter: conflictRequeue}, nil
+	}
+	return res, err
+}
+
 func applyOwnedError(reason string, err error) error {
 	if err == nil {
 		return nil
@@ -76,6 +90,7 @@ func ensureOwned(ctx context.Context, c client.Client, scheme *runtime.Scheme, s
 		if _, err := controllerutil.CreateOrUpdate(ctx, c, pvc, func() error {
 			if !pvc.CreationTimestamp.IsZero() {
 				pvc.Labels = spec.Labels
+				resources.ExpandPVC(pvc, spec.Persistence)
 				return setOwner(pvc)
 			}
 			resources.MutatePVC(pvc, spec.Persistence, spec.Labels)
