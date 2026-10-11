@@ -98,7 +98,7 @@
             <button type="button" class="copy" data-copy="#helm-install" aria-label="Copy Helm install">Copy</button>
           </div>
           <pre tabindex="0"><code>helm install karkive oci://ghcr.io/mahdidarabi/charts/karkive \
-  --version 0.0.12-p.2 \
+  --version 0.0.12-p.3 \
   -n karkive-system --create-namespace</code></pre>
         </div>
         <ul class="engines-row" aria-label="Supported engines">
@@ -279,6 +279,8 @@
           <p>
             KArkive exposes Prometheus metrics per namespace, name, and engine. The Helm
             chart can install a ServiceMonitor, alert rules, and this ready-to-import Grafana dashboard.
+            One Prometheus for several clusters? Name the label that tells them apart and the
+            dashboard keeps them apart too.
           </p>
         </div>
 
@@ -289,6 +291,7 @@
               <strong>Backup &amp; restore overview</strong>
             </div>
             <div class="dash-controls">
+              <span class="dash-select">All clusters <b>⌄</b></span>
               <span class="dash-select">All namespaces <b>⌄</b></span>
               <span class="dash-select">All engines <b>⌄</b></span>
               <span class="dash-time">Last 24 hours</span>
@@ -380,14 +383,15 @@
             </li>
             <li>
               <strong><span>03</span> Keep the filters</strong>
-              <p>The dashboard uses <code>$namespace</code>, <code>$engine</code>, and a <code>30s</code> refresh to follow every CR.</p>
+              <p>The dashboard uses <code>$namespace</code>, <code>$engine</code>, and a <code>30s</code> refresh to follow every CR. Set <code>sourceLabel</code> to add a <code>$source</code> filter for many clusters in one Prometheus.</p>
             </li>
           </ol>
           <p class="grafana-hint">
             Helm switches:
             <code>metrics.serviceMonitor.enabled=true</code>
             <code>metrics.grafanaDashboard.enabled=true</code>
-            <span>Default dashboard label: <code>grafana_dashboard: "1"</code>.</span>
+            <code>metrics.grafanaDashboard.sourceLabel=cluster</code>
+            <span>Default dashboard label: <code>grafana_dashboard: "1"</code>. <code>sourceLabel</code> is empty by default; set it to your cluster label (<code>cluster</code>, <code>k8s_cluster</code>, …).</span>
           </p>
         </div>
       </section>
@@ -397,7 +401,7 @@
           <p class="eyebrow">Install</p>
           <h2>Helm from GHCR.</h2>
           <p>
-            Current chart: <strong id="ver">0.0.12-p.2</strong>.
+            Current chart: <strong id="ver">0.0.12-p.3</strong>.
             Images publish to <code>ghcr.io/mahdidarabi/karkive</code>; charts to
             <code>oci://ghcr.io/mahdidarabi/charts/karkive</code>.
           </p>
@@ -408,7 +412,7 @@
             <button type="button" class="copy" data-copy="#helm-install" aria-label="Copy Helm install">Copy</button>
           </div>
           <pre id="helm-install" tabindex="0"><code>helm install karkive oci://ghcr.io/mahdidarabi/charts/karkive \
-  --version 0.0.12-p.2 \
+  --version 0.0.12-p.3 \
   -n karkive-system --create-namespace</code></pre>
         </div>
         <p class="install-note">

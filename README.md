@@ -104,13 +104,13 @@ Redis restore starts an ephemeral `redis-server` in the Job and has the target `
 
 Images are published to `ghcr.io/mahdidarabi/karkive` from GitHub Actions on `main` (`latest`, `main`, `sha-<git-sha>`) and on tags `v*` (semver). Helm charts are pushed to GHCR on tags `v*`. `Chart.yaml` `version` and `appVersion` must match the tag without the `v` prefix.
 
-Current release: **`0.0.12-p.2`**
+Current release: **`0.0.12-p.3`**
 
 ```bash
-helm show chart oci://ghcr.io/mahdidarabi/charts/karkive --version 0.0.12-p.2
+helm show chart oci://ghcr.io/mahdidarabi/charts/karkive --version 0.0.12-p.3
 
 helm install karkive oci://ghcr.io/mahdidarabi/charts/karkive \
-  --version 0.0.12-p.2 \
+  --version 0.0.12-p.3 \
   -n karkive-system --create-namespace
 ```
 
@@ -118,7 +118,7 @@ With Prometheus Operator scrape, alerts, and a Grafana dashboard ConfigMap:
 
 ```bash
 helm install karkive oci://ghcr.io/mahdidarabi/charts/karkive \
-  --version 0.0.12-p.2 \
+  --version 0.0.12-p.3 \
   -n karkive-system --create-namespace \
   --set metrics.serviceMonitor.enabled=true \
   --set metrics.prometheusRule.enabled=true \
@@ -129,7 +129,7 @@ On GitOps (Argo CD), prefer cert-manager for webhook serving certs so Helm does 
 
 ```bash
 helm install karkive oci://ghcr.io/mahdidarabi/charts/karkive \
-  --version 0.0.12-p.2 \
+  --version 0.0.12-p.3 \
   -n karkive-system --create-namespace \
   --set webhook.certManager.enabled=true
 ```
