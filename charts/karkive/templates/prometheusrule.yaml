@@ -70,7 +70,7 @@ spec:
         - alert: KArkiveBackupNoFinishedJob
           expr: |-
             karkive_backup_last_schedule_timestamp_seconds
-            unless on(namespace, name, engine) karkive_backup_last_job_info
+            unless ignoring(outcome, reason, job_name) karkive_backup_last_job_info
           for: 15m
           labels:
             severity: warning
@@ -80,7 +80,7 @@ spec:
         - alert: KArkiveRestoreNoFinishedJob
           expr: |-
             karkive_restore_last_schedule_timestamp_seconds
-            unless on(namespace, name, engine) karkive_restore_last_job_info
+            unless ignoring(outcome, reason, job_name) karkive_restore_last_job_info
           for: 15m
           labels:
             severity: warning

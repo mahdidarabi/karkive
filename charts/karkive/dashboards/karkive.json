@@ -310,7 +310,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "count((time() - karkive_backup_last_successful_timestamp_seconds{namespace=~\"$namespace\",engine=~\"$engine\"} > 129600) and on(namespace,name,engine) (karkive_backup_suspended{namespace=~\"$namespace\",engine=~\"$engine\"} == 0)) or vector(0)",
+          "expr": "count((time() - karkive_backup_last_successful_timestamp_seconds{namespace=~\"$namespace\",engine=~\"$engine\"} > 129600) and (karkive_backup_suspended{namespace=~\"$namespace\",engine=~\"$engine\"} == 0)) or vector(0)",
           "legendFormat": "stale",
           "refId": "A"
         }
@@ -568,7 +568,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max((time() - karkive_backup_last_successful_timestamp_seconds{namespace=~\"$namespace\",engine=~\"$engine\"}) and on(namespace,name,engine) (karkive_backup_suspended{namespace=~\"$namespace\",engine=~\"$engine\"} == 0)) or vector(0)",
+          "expr": "max((time() - karkive_backup_last_successful_timestamp_seconds{namespace=~\"$namespace\",engine=~\"$engine\"}) and (karkive_backup_suspended{namespace=~\"$namespace\",engine=~\"$engine\"} == 0)) or vector(0)",
           "legendFormat": "age",
           "refId": "A"
         }
@@ -1000,7 +1000,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (kind, namespace, name, engine, outcome, reason, job_name) (label_replace(karkive_backup_last_job_duration_seconds{namespace=~\"$namespace\",engine=~\"$engine\"} * on(namespace,name,engine) group_left(outcome,reason,job_name) karkive_backup_last_job_info{namespace=~\"$namespace\",engine=~\"$engine\"}, \"kind\", \"Backup\", \"\", \"\")) or sum by (kind, namespace, name, engine, outcome, reason, job_name) (label_replace(karkive_restore_last_job_duration_seconds{namespace=~\"$namespace\",engine=~\"$engine\"} * on(namespace,name,engine) group_left(outcome,reason,job_name) karkive_restore_last_job_info{namespace=~\"$namespace\",engine=~\"$engine\"}, \"kind\", \"Restore\", \"\", \"\"))",
+          "expr": "sum by (kind, namespace, name, engine, outcome, reason, job_name) (label_replace(karkive_backup_last_job_duration_seconds{namespace=~\"$namespace\",engine=~\"$engine\"} * ignoring(outcome,reason,job_name) group_left(outcome,reason,job_name) karkive_backup_last_job_info{namespace=~\"$namespace\",engine=~\"$engine\"}, \"kind\", \"Backup\", \"\", \"\")) or sum by (kind, namespace, name, engine, outcome, reason, job_name) (label_replace(karkive_restore_last_job_duration_seconds{namespace=~\"$namespace\",engine=~\"$engine\"} * ignoring(outcome,reason,job_name) group_left(outcome,reason,job_name) karkive_restore_last_job_info{namespace=~\"$namespace\",engine=~\"$engine\"}, \"kind\", \"Restore\", \"\", \"\"))",
           "format": "table",
           "instant": true,
           "refId": "A"
@@ -1010,7 +1010,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (kind, namespace, name, engine, outcome, reason, job_name) (label_replace((time() - karkive_backup_last_successful_timestamp_seconds{namespace=~\"$namespace\",engine=~\"$engine\"}) * on(namespace,name,engine) group_left(outcome,reason,job_name) karkive_backup_last_job_info{namespace=~\"$namespace\",engine=~\"$engine\"}, \"kind\", \"Backup\", \"\", \"\")) or sum by (kind, namespace, name, engine, outcome, reason, job_name) (label_replace((time() - karkive_restore_last_successful_timestamp_seconds{namespace=~\"$namespace\",engine=~\"$engine\"}) * on(namespace,name,engine) group_left(outcome,reason,job_name) karkive_restore_last_job_info{namespace=~\"$namespace\",engine=~\"$engine\"}, \"kind\", \"Restore\", \"\", \"\"))",
+          "expr": "sum by (kind, namespace, name, engine, outcome, reason, job_name) (label_replace((time() - karkive_backup_last_successful_timestamp_seconds{namespace=~\"$namespace\",engine=~\"$engine\"}) * ignoring(outcome,reason,job_name) group_left(outcome,reason,job_name) karkive_backup_last_job_info{namespace=~\"$namespace\",engine=~\"$engine\"}, \"kind\", \"Backup\", \"\", \"\")) or sum by (kind, namespace, name, engine, outcome, reason, job_name) (label_replace((time() - karkive_restore_last_successful_timestamp_seconds{namespace=~\"$namespace\",engine=~\"$engine\"}) * ignoring(outcome,reason,job_name) group_left(outcome,reason,job_name) karkive_restore_last_job_info{namespace=~\"$namespace\",engine=~\"$engine\"}, \"kind\", \"Restore\", \"\", \"\"))",
           "format": "table",
           "instant": true,
           "refId": "B"
@@ -1161,7 +1161,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "(count(karkive_backup_ready{namespace=~\"$namespace\",engine=~\"$engine\"} unless on(namespace,name,engine) karkive_backup_last_job_info) or vector(0)) + (count(karkive_restore_ready{namespace=~\"$namespace\",engine=~\"$engine\"} unless on(namespace,name,engine) karkive_restore_last_job_info) or vector(0))",
+          "expr": "(count(karkive_backup_ready{namespace=~\"$namespace\",engine=~\"$engine\"} unless ignoring(outcome,reason,job_name) karkive_backup_last_job_info) or vector(0)) + (count(karkive_restore_ready{namespace=~\"$namespace\",engine=~\"$engine\"} unless ignoring(outcome,reason,job_name) karkive_restore_last_job_info) or vector(0))",
           "legendFormat": "none",
           "refId": "A"
         }
@@ -1256,7 +1256,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max by (kind, name, engine) (label_replace(karkive_backup_last_job_failed{namespace=~\"$namespace\",engine=~\"$engine\"} and on(namespace,name,engine) karkive_backup_last_job_info, \"kind\", \"Backup\", \"\", \"\"))",
+          "expr": "max by (kind, name, engine) (label_replace(karkive_backup_last_job_failed{namespace=~\"$namespace\",engine=~\"$engine\"} and ignoring(outcome,reason,job_name) karkive_backup_last_job_info, \"kind\", \"Backup\", \"\", \"\"))",
           "legendFormat": "{{name}}",
           "refId": "A"
         }
@@ -1351,7 +1351,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max by (kind, name, engine) (label_replace(karkive_restore_last_job_failed{namespace=~\"$namespace\",engine=~\"$engine\"} and on(namespace,name,engine) karkive_restore_last_job_info, \"kind\", \"Restore\", \"\", \"\"))",
+          "expr": "max by (kind, name, engine) (label_replace(karkive_restore_last_job_failed{namespace=~\"$namespace\",engine=~\"$engine\"} and ignoring(outcome,reason,job_name) karkive_restore_last_job_info, \"kind\", \"Restore\", \"\", \"\"))",
           "legendFormat": "{{name}}",
           "refId": "A"
         }
@@ -1844,5 +1844,5 @@
   "timezone": "browser",
   "title": "KArkive",
   "uid": "karkive",
-  "version": 9
+  "version": 10
 }

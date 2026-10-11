@@ -13,6 +13,47 @@
 {{- $_ := set $labels $folderKey ($dash.folder | replace "/" "-") }}
 {{- $_ := set $annotations $folderKey $dash.folder }}
 {{- end }}
+{{- $json := .Files.Get "dashboards/karkive.json" }}
+{{- with $dash.sourceLabel }}
+{{- $l := . }}
+{{- $title := $l | replace "_" " " | title }}
+{{- if not (regexMatch "^[a-zA-Z_][a-zA-Z0-9_]*$" $l) }}
+{{- fail (printf "metrics.grafanaDashboard.sourceLabel %q is not a valid Prometheus label name" $l) }}
+{{- end }}
+{{- /* Filter every selector by $source and keep the label in every by().
+       Series without the label still match (allValue .*), so this is safe
+       on a single source. */}}
+{{- $json = $json | replace `namespace=~\"$namespace\"` (printf `%s=~\"$source\",namespace=~\"$namespace\"` $l) }}
+{{- $json = $json | replace `_ready\"}, namespace)` (printf `_ready\",%s=~\"$source\"}, namespace)` $l) }}
+{{- $json = $json | replace `{controller=~\"backup|restore\"}` (printf `{%s=~\"$source\",controller=~\"backup|restore\"}` $l) }}
+{{- $json = $json | replace "by (kind, " (printf "by (kind, %s, " $l) }}
+{{- $json = $json | replace "by (name, " (printf "by (%s, name, " $l) }}
+{{- $json = $json | replace "by (controller)" (printf "by (%s, controller)" $l) }}
+{{- /* Label last in legends: absent on a single source, it leaves only a trailing space. */}}
+{{- $json = $json | replace "{{name}}" (printf "{{name}} {{%s}}" $l) }}
+{{- $json = $json | replace "{{controller}}" (printf "{{controller}} {{%s}}" $l) }}
+{{- $d := fromJson $json }}
+{{- $q := printf `label_values({__name__=~"karkive_(backup|restore)_ready"}, %s)` $l }}
+{{- $var := dict "name" "source" "label" $title "type" "query" "query" $q "definition" $q "datasource" (dict "type" "prometheus" "uid" "${datasource}") "includeAll" true "allValue" ".*" "multi" true "current" (dict "text" "All" "value" "$__all") "options" list "refresh" 2 "regex" "" "sort" 1 }}
+{{- $vars := $d.templating.list }}
+{{- $_ := set $d.templating "list" (concat (list (first $vars) $var) (rest $vars)) }}
+{{- /* Last job table: source column right after Kind. */}}
+{{- range $p := $d.panels }}
+{{- range $t := ($p.transformations | default list) }}
+{{- if eq $t.id "organize" }}
+{{- $idx := $t.options.indexByName }}
+{{- range $k, $v := $idx }}
+{{- if ge (int $v) 1 }}
+{{- $_ := set $idx $k (add1 (int $v)) }}
+{{- end }}
+{{- end }}
+{{- $_ := set $idx $l 1 }}
+{{- $_ := set $t.options.renameByName $l $title }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- $json = toPrettyJson $d }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -30,5 +71,5 @@ metadata:
   {{- end }}
 data:
   karkive.json: |-
-{{ .Files.Get "dashboards/karkive.json" | nindent 4 }}
+{{ $json | nindent 4 }}
 {{- end }}

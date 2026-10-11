@@ -104,13 +104,13 @@ Redis restore starts an ephemeral `redis-server` in the Job and has the target `
 
 Images are published to `ghcr.io/mahdidarabi/karkive` from GitHub Actions on `main` (`latest`, `main`, `sha-<git-sha>`) and on tags `v*` (semver). Helm charts are pushed to GHCR on tags `v*`. `Chart.yaml` `version` and `appVersion` must match the tag without the `v` prefix.
 
-Current release: **`0.0.12-p.1`**
+Current release: **`0.0.12-p.2`**
 
 ```bash
-helm show chart oci://ghcr.io/mahdidarabi/charts/karkive --version 0.0.12-p.1
+helm show chart oci://ghcr.io/mahdidarabi/charts/karkive --version 0.0.12-p.2
 
 helm install karkive oci://ghcr.io/mahdidarabi/charts/karkive \
-  --version 0.0.12-p.1 \
+  --version 0.0.12-p.2 \
   -n karkive-system --create-namespace
 ```
 
@@ -118,7 +118,7 @@ With Prometheus Operator scrape, alerts, and a Grafana dashboard ConfigMap:
 
 ```bash
 helm install karkive oci://ghcr.io/mahdidarabi/charts/karkive \
-  --version 0.0.12-p.1 \
+  --version 0.0.12-p.2 \
   -n karkive-system --create-namespace \
   --set metrics.serviceMonitor.enabled=true \
   --set metrics.prometheusRule.enabled=true \
@@ -129,7 +129,7 @@ On GitOps (Argo CD), prefer cert-manager for webhook serving certs so Helm does 
 
 ```bash
 helm install karkive oci://ghcr.io/mahdidarabi/charts/karkive \
-  --version 0.0.12-p.1 \
+  --version 0.0.12-p.2 \
   -n karkive-system --create-namespace \
   --set webhook.certManager.enabled=true
 ```
@@ -399,6 +399,8 @@ Alerts (when `metrics.prometheusRule.enabled=true`):
 - No successful backup within `backupStaleSeconds` (default 36h) on non-suspended Backups
 - CronJob has scheduled but no Job has finished
 - Missed CronJob schedule via kube-state-metrics (`karkive-backup-*` / `karkive-restore-*`)
+
+When one Prometheus holds several KArkive installs (for example clusters sending remote_write with an external label), set `metrics.grafanaDashboard.sourceLabel` to the label that tells them apart (for example `cluster`, `k8s_cluster` or `region`; empty by default). The dashboard then gets a variable titled after the label and keeps it in every aggregation, so a Backup with the same name in two sources shows as two rows. Series without the label still show.
 
 ## Webhooks
 

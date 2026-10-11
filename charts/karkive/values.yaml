@@ -92,6 +92,13 @@ metrics:
     folder: ""
     folderKey: grafana_folder
     annotations: {}
+    # Series label that tells sources apart when one Prometheus holds
+    # several KArkive installs (e.g. cluster, k8s_cluster, region; usually a
+    # remote_write external label). Set it to add a dashboard variable
+    # titled after the label and keep the label in every aggregation, so
+    # the same Backup name from two sources shows as two rows. Series
+    # without the label still show. Empty (default): no variable.
+    sourceLabel: ""
 
 probes:
   port: 8081
