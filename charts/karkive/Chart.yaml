@@ -2,7 +2,7 @@ apiVersion: v2
 name: karkive
 description: KArkive Kubernetes operator for logical backups and restores (Postgres, MariaDB, Redis) and PVC file backups
 type: application
-version: 0.0.12-p.3
-appVersion: "0.0.12-p.3"
+version: 0.0.13
+appVersion: "0.0.13"
 annotations:
   org.opencontainers.image.source: https://github.com/mahdidarabi/karkive
