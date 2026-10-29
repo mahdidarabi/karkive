@@ -146,6 +146,32 @@ func TestPgRestoreStripsPgAuditEventTriggers(t *testing.T) {
 	}
 }
 
+func TestPgRestoreDetectsExtensionsFromDDLOnly(t *testing.T) {
+	s, err := RestoreScript("pgrestore.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`grep -Eq '^(CREATE|DROP) EXTENSION([[:space:]]+IF([[:space:]]+NOT)?[[:space:]]+EXISTS)?[[:space:]]+("timescaledb"|timescaledb)'`,
+		`grep -Eq '^COPY[[:space:]]+"?_timescaledb_catalog"?\.'`,
+		`grep -Eq '^(CREATE|DROP) EXTENSION([[:space:]]+IF([[:space:]]+NOT)?[[:space:]]+EXISTS)?[[:space:]]+("pgaudit"|pgaudit)'`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("pgrestore.sh missing %q", want)
+		}
+	}
+	// Unanchored patterns also match COPY data that mentions the extension.
+	for _, bad := range []string{
+		`grep -Eq 'CREATE EXTENSION.*`,
+		`grep -Eq 'DROP EXTENSION.*`,
+		`grep -Eq '_timescaledb_catalog'`,
+	} {
+		if strings.Contains(s, bad) {
+			t.Errorf("pgrestore.sh has unanchored detection %q", bad)
+		}
+	}
+}
+
 func TestPgDumpDisablesStatementTimeout(t *testing.T) {
 	s, err := BackupScript("pgdump.sh")
 	if err != nil {

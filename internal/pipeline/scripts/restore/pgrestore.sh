@@ -156,17 +156,18 @@ log "applying pg_dump SQL into ${PGDATABASE}"
 # pgAudit objects are optional (STRIP_PGAUDIT_EXTENSION); restore targets
 # usually lack shared_preload_libraries=pgaudit.
 FILTERED="${WORKDIR}/dump.filtered"
+# Detect DDL at line start only, like the strip_* filters. COPY rows never
+# start with a statement, so table data that mentions these names (e.g. a
+# wiki page quoting CREATE EXTENSION timescaledb) does not count.
 if strip_pgaudit_enabled \
-  && { grep -Eq 'CREATE EXTENSION.*(pgaudit|"pgaudit")' "$DUMP" \
-    || grep -Eq 'DROP EXTENSION.*(pgaudit|"pgaudit")' "$DUMP" \
-    || grep -Eq 'EVENT TRIGGER[[:space:]]+"?pgaudit_' "$DUMP" \
-    || grep -Eq 'FUNCTION[[:space:]].*pgaudit_(ddl_command_end|sql_drop)' "$DUMP"; }; then
+  && { grep -Eq '^(CREATE|DROP) EXTENSION([[:space:]]+IF([[:space:]]+NOT)?[[:space:]]+EXISTS)?[[:space:]]+("pgaudit"|pgaudit)' "$DUMP" \
+    || grep -Eq '^(CREATE|DROP|ALTER) EVENT TRIGGER([[:space:]]+IF[[:space:]]+EXISTS)?[[:space:]]+"?pgaudit_' "$DUMP" \
+    || grep -Eq '^(CREATE|DROP|ALTER) FUNCTION[[:space:]].*pgaudit_(ddl_command_end|sql_drop)' "$DUMP"; }; then
   log "pgAudit objects in dump; STRIP_PGAUDIT_EXTENSION=${STRIP_PGAUDIT_EXTENSION}; stripping extension/event-trigger/function DDL"
 fi
 IS_TIMESCALE=0
-if grep -Eq 'CREATE EXTENSION.*(timescaledb|"timescaledb")' "$DUMP" \
-  || grep -Eq 'DROP EXTENSION.*(timescaledb|"timescaledb")' "$DUMP" \
-  || grep -Eq '_timescaledb_catalog' "$DUMP"; then
+if grep -Eq '^(CREATE|DROP) EXTENSION([[:space:]]+IF([[:space:]]+NOT)?[[:space:]]+EXISTS)?[[:space:]]+("timescaledb"|timescaledb)' "$DUMP" \
+  || grep -Eq '^COPY[[:space:]]+"?_timescaledb_catalog"?\.' "$DUMP"; then
   IS_TIMESCALE=1
 fi
 
